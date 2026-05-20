@@ -1,0 +1,45 @@
+# ─── Secrets ──────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ─── OS / editor cruft ────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# ─── Node / TypeScript ────────────────────────────────────
+node_modules/
+dist/
+build/
+.next/
+.turbo/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+
+# ─── Python ───────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ─── Claude Code runtime / machine-local ──────────────────
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
+
+# ─── IDE / Assistant rules synced from external memory ────
+.cursor/rules/openmemory.mdc
+
+# ─── Empty placeholder kept out of template ───────────────
+openmemory.md
