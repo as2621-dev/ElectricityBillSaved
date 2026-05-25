@@ -2,6 +2,38 @@
 
 A slim Claude Code template. 9 commands, 12 rules. No fluff.
 
+---
+
+## SMT electricity-usage ingest (Phase 1)
+
+Pulls your **Smart Meter Texas** daily interval report (a `text/csv` attachment SMT
+emails to your account-profile inbox) over **IMAP**, saves the CSVs, and reports
+daily kWh. See `reference/integrations.md` §1 for the full delivery contract.
+
+**Setup (one time):**
+1. Copy env and fill the SMT keys: `cp .env.example .env`
+2. Gmail needs a 16-char **App Password** (2-Step Verification on) — *not* your
+   account password, *not* OAuth. Set in `.env`:
+   ```
+   SMT_IMAP_USERNAME=you@gmail.com
+   SMT_IMAP_APP_PASSWORD=xxxxxxxxxxxxxxxx
+   ```
+   `SMT_IMAP_HOST/PORT/MAILBOX` and `SMT_EMAIL_FROM_FILTER` have working Gmail defaults.
+
+**Use:**
+```bash
+python fetch_smt_csv.py --since 2026-05-19   # download new CSVs → data/smt/ (gitignored)
+python show_smt_usage.py                     # per-day kWh table + averages
+python show_smt_usage.py --json              # machine-readable
+```
+
+**Code:** `meter/email_backend.py` (IMAP fetch), `meter/csv_parser.py` (parse to
+intervals/daily totals), `meter/models.py` (Pydantic models). Stdlib only —
+`imaplib`/`email`/`csv`/`zipfile`. Idempotent: dedupes by attachment filename, never
+deletes mail. CSV schema: `ESIID, USAGE_DATE, REVISION_DATE, USAGE_START_TIME,
+USAGE_END_TIME, USAGE_KWH, ESTIMATED_ACTUAL, CONSUMPTION_SURPLUSGENERATION`
+(96 rows = one complete service day; total = sum of consumption kWh).
+
 ## Use this template for a new project
 
 This repo is configured as a **GitHub Template Repository**. Don't fork — use the template button.

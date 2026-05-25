@@ -40,16 +40,17 @@
 |---|---|
 | **What** | Free weather API with both historical daily aggregates and forecast. |
 | **Used for** | Historical daily `T_avg` paired with each stored kWh day (for model fitting); forecast `T_avg` per day for projection. |
-| **Module** | `weather/`. |
-| **Endpoints** | History: `https://archive-api.open-meteo.com/v1/archive` · Forecast: `https://api.open-meteo.com/v1/forecast`. |
-| **Auth pattern** | None — no API key. |
-| **Required env vars** | `WEATHER_LAT`, `WEATHER_LON`. Default to Houston: `29.7604, -95.3698`. |
-| **Required query params** | `latitude`, `longitude`, `daily=temperature_2m_mean,temperature_2m_max,temperature_2m_min`, `temperature_unit=fahrenheit`, `timezone=America/Chicago`. |
+| **Module** | `weather/` (`client.py` calls, `projection.py` stitching, `models.py`). CLI: `show_weather.py`. |
+| **Endpoints** | ZIP→coords: `https://api.zippopotam.us/us/<zip>` · Forecast: `https://api.open-meteo.com/v1/forecast` · History/normals: `https://archive-api.open-meteo.com/v1/archive`. |
+| **Auth pattern** | None — no API key on any of the three. |
+| **Required env vars** | `WEATHER_ZIP` (default for `show_weather.py`; CLI `--zip` overrides). Coordinates are resolved from the ZIP, so `WEATHER_LAT`/`WEATHER_LON` are no longer needed. |
+| **Required query params** | `latitude`, `longitude`, `daily=temperature_2m_max,temperature_2m_min,precipitation_sum`, `temperature_unit=fahrenheit`, `precipitation_unit=inch`, `timezone=auto`. |
 | **Rate limits** | None for personal use. Cache responses for the day — don't re-query inside one cron run. |
-| **Latency** | History updates with a 1–2 day lag (matches SMT's lag — convenient). |
-| **Forecast horizon** | ~16 days. When `days_remaining > forecast_days`, fall back to **30-day trailing-average `T_avg`** for the uncovered tail. Surface the fallback in the recommendation output. |
-| **Failure modes** | Network failure (transient) — log and retry on next cron run; degraded reports are acceptable for one day. |
+| **Latency** | History updates with a ~5-day lag, but the climatology backfill only reads *fully past* years, so the lag never affects it. |
+| **Forecast horizon** | ~16 days (Open-Meteo cap). Days beyond the horizon are filled with **multi-year climatology normals** (per-calendar-day average over the last N years, default 5) and tagged `source='climatology'` so callers can weight confidence. |
+| **Failure modes** | Network failure (transient) — log and retry on next cron run; degraded reports are acceptable for one day. Unknown ZIP → clean `ValueError` (CLI exits 2). |
 | **Ruled out** | OpenWeather / Tomorrow.io (require keys; no advantage); NWS (no history endpoint at the granularity we want). |
+| **⚠ Deviations from original M2 spec** | (1) **Input is ZIP, not lat/lon env vars** — per product requirement that users supply a ZIP. (2) **Backfill is multi-year climatology normals, not a 30-day trailing average** — chosen for full-cycle accuracy. (3) **Fetches min/max + `precipitation_sum`; `temperature_2m_mean` (T_avg) is NOT yet fetched.** The kWh model-fit path still needs T_avg — add `temperature_2m_mean` to `DAILY_FIELDS` + `DailyWeather` when wiring that up. |
 
 ---
 

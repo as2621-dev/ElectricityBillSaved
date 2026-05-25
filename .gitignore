@@ -41,5 +41,11 @@ htmlcov/
 # ─── IDE / Assistant rules synced from external memory ────
 .cursor/rules/openmemory.mdc
 
+# ─── Personal meter data (never commit usage CSVs) ────────
+/data/
+
 # ─── Empty placeholder kept out of template ───────────────
 openmemory.md
+
+# OpenMemory - IDE/Assistant specific rules
+CLAUDE.md
