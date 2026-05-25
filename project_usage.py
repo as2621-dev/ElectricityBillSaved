@@ -29,7 +29,6 @@ from dotenv import load_dotenv
 
 from meter.csv_parser import load_daily_usage
 from project_bill import (
-    BILL_CREDIT_AMOUNT_USD,
     BILL_CREDIT_THRESHOLD_KWH,
     estimate_bill,
 )
@@ -117,10 +116,12 @@ def main() -> int:
     print(f"  cycle        : {cycle_start} → {next_read} (est.)  {len(cycle_dates)} service days   (today {today})")
     print(f"\n  fitted model : kWh/day ≈ {baseload:.1f} baseload + {beta:.2f} × CDD65(°F)")
     print(f"  fit quality  : R² = {r2:.2f} on {len(fit_dates)} metered day(s)")
-    print(f"  reads as     : ~{baseload:.0f} kWh/day with AC off, +{beta:.2f} kWh for every °F the daily mean sits above 65°F\n")
+    print(
+        f"  reads as     : ~{baseload:.0f} kWh/day with AC off, +{beta:.2f} kWh for every °F the daily mean sits above 65°F\n"
+    )
 
     print(f"  {'date':<12}{'mean°F':>7}{'CDD':>6}  {'src':<5}{'kWh':>8}  note")
-    print(f"  {'-'*11:<12}{'-'*6:>7}{'-'*5:>6}  {'-'*4:<5}{'-'*7:>8}  {'-'*4}")
+    print(f"  {'-' * 11:<12}{'-' * 6:>7}{'-' * 5:>6}  {'-' * 4:<5}{'-' * 7:>8}  {'-' * 4}")
     actual_sum = modeled_sum = 0.0
     actual_n = modeled_n = 0
     missing: list[date] = []
@@ -149,13 +150,17 @@ def main() -> int:
         verdict = "MISS — well under 1000 at this rate"
 
     bill = estimate_bill(total)
-    print(f"\n  metered so far : {actual_sum:.1f} kWh ({actual_n} days)   modeled : {modeled_sum:.1f} kWh ({modeled_n} days)")
+    print(
+        f"\n  metered so far : {actual_sum:.1f} kWh ({actual_n} days)   modeled : {modeled_sum:.1f} kWh ({modeled_n} days)"
+    )
     print(f"  PROJECTED TOTAL: ~{total:.0f} kWh over {len(cycle_dates)} days")
     print(f"\n  --- $125 credit cliff (threshold {BILL_CREDIT_THRESHOLD_KWH} kWh) ---")
     print(f"  margin   : {margin:+.0f} kWh vs 1000     VERDICT: {verdict}")
     print(f"  est. bill at ~{total:.0f} kWh: ${bill['total']:.2f}  (credit {bill['credit']:.0f})")
-    print(f"  cliff: 999 kWh → ${estimate_bill(999)['total']:.2f}  vs  1000 kWh → ${estimate_bill(1000)['total']:.2f}"
-          f"  ({estimate_bill(999)['total'] - estimate_bill(1000)['total']:+.0f} for 1 kWh)")
+    print(
+        f"  cliff: 999 kWh → ${estimate_bill(999)['total']:.2f}  vs  1000 kWh → ${estimate_bill(1000)['total']:.2f}"
+        f"  ({estimate_bill(999)['total'] - estimate_bill(1000)['total']:+.0f} for 1 kWh)"
+    )
     if missing:
         print(f"\n  note: no weather for {len(missing)} day(s) (forecast horizon) — excluded.")
     print(f"  caveats: model fit on only {len(fit_dates)} days; next-read date estimated; mean temp ≈ (min+max)/2.\n")
