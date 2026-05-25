@@ -44,8 +44,16 @@ def _parse_reading_type(raw: str) -> str:
 
 
 def _parse_interval_start(usage_date: str, start_time: str) -> datetime:
-    """Combine USAGE_DATE (MM/DD/YYYY) and USAGE_START_TIME (' HH:MM') into a datetime."""
-    return datetime.strptime(f"{usage_date.strip()} {start_time.strip()}", "%m/%d/%Y %H:%M")
+    """Combine USAGE_DATE and USAGE_START_TIME into a datetime.
+
+    Handles both SMT date variants: the emailed report's `MM/DD/YYYY` and the
+    portal export's `M/D/YY` (2-digit year, which would silently mis-parse as year
+    0026 under %Y). Times may be `HH:MM` or `H:MM`, with or without a leading space.
+    """
+    date_part = usage_date.strip()
+    year_token = date_part.split("/")[-1]
+    date_fmt = "%m/%d/%y" if len(year_token) <= 2 else "%m/%d/%Y"
+    return datetime.strptime(f"{date_part} {start_time.strip()}", f"{date_fmt} %H:%M")
 
 
 def parse_interval_csv(path: str | Path) -> list[IntervalReading]:

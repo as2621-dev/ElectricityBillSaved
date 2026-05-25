@@ -132,40 +132,52 @@ def _daily_rows(payload: dict) -> list[tuple[date, float, float, float]]:
     return rows
 
 
+MAX_PAST_DAYS: int = 92  # Open-Meteo cap for past_days on the forecast endpoint.
+
+
 def fetch_forecast(
     latitude: float,
     longitude: float,
     *,
     days: int = MAX_FORECAST_DAYS,
+    past_days: int = 0,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> list[DailyWeather]:
     """Fetch the near-term daily forecast (min/max temp + precip) from Open-Meteo.
+
+    With `past_days > 0` the response is prefixed with recent OBSERVED/reanalysis
+    days (available without the archive's ~5-day lag), which is what callers need to
+    regress against actual recent weather. All rows are tagged source='forecast';
+    callers that care should classify observed vs forecast by date.
 
     Args:
         latitude: Decimal latitude.
         longitude: Decimal longitude.
         days: Number of forecast days (clamped to Open-Meteo's 16-day cap).
+        past_days: Recent days to prepend (clamped to Open-Meteo's 92-day cap).
         timeout: Per-request timeout in seconds.
 
     Returns:
-        One `DailyWeather` per day (source='forecast'), starting today, ascending.
+        One `DailyWeather` per day, ascending (past days first, then today→future).
 
     Example:
-        >>> rows = fetch_forecast(32.79, -96.80, days=16)
+        >>> rows = fetch_forecast(32.79, -96.80, days=16, past_days=14)
         >>> rows[0].source
         'forecast'
     """
     days = max(1, min(days, MAX_FORECAST_DAYS))
+    past_days = max(0, min(past_days, MAX_PAST_DAYS))
     params = {
         "latitude": latitude,
         "longitude": longitude,
         "daily": DAILY_FIELDS,
         "forecast_days": days,
+        "past_days": past_days,
         "temperature_unit": TEMPERATURE_UNIT,
         "precipitation_unit": PRECIPITATION_UNIT,
         "timezone": "auto",
     }
-    logger.info("fetch_forecast_started", latitude=latitude, longitude=longitude, days=days)
+    logger.info("fetch_forecast_started", latitude=latitude, longitude=longitude, days=days, past_days=past_days)
     response = httpx.get(OPEN_METEO_FORECAST_URL, params=params, timeout=timeout)
     response.raise_for_status()
 

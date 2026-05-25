@@ -34,6 +34,18 @@ deletes mail. CSV schema: `ESIID, USAGE_DATE, REVISION_DATE, USAGE_START_TIME,
 USAGE_END_TIME, USAGE_KWH, ESTIMATED_ACTUAL, CONSUMPTION_SURPLUSGENERATION`
 (96 rows = one complete service day; total = sum of consumption kWh).
 
+**Projection — will you clear the 1000 kWh bill-credit threshold?**
+```bash
+python show_weather.py --zip 77080      # forecast + climatology weather outlook for the cycle
+python project_bill.py                  # naive: flat recent-average × cycle days
+python project_usage.py                 # weather-driven: fit kWh = baseload + β·CDD, drive with forecast
+```
+`project_usage.py` fits **kWh/day ≈ baseload + β·CDD65** (cooling degree-days) on the
+days with both metered usage (SMT) and real weather, then projects each remaining
+cycle day from the Open-Meteo forecast — catching the seasonal heat ramp the flat
+average misses. Plan/rate constants come from the bill; `weather/` (httpx, no API key)
+geocodes the ZIP and stitches forecast + multi-year climatology. Needs `pip install -r requirements.txt`.
+
 ## Use this template for a new project
 
 This repo is configured as a **GitHub Template Repository**. Don't fork — use the template button.
