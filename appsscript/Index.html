@@ -23,9 +23,14 @@
     }
 
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-    html, body { margin: 0; height: 100%; }
+    html, body { margin: 0; }
+    /* Fixed viewport height — fall back to vh, prefer svh on iOS so the chart
+       isn't pushed below the dynamic toolbar and the page can't scroll. */
+    html { height: 100vh; height: 100svh; }
     body {
-      overflow-x: hidden;
+      height: 100vh;
+      height: 100svh;
+      overflow: hidden;
       font-family: -apple-system, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       color: var(--ink);
       background:
@@ -127,44 +132,69 @@
       -webkit-backdrop-filter: blur(8px);
     }
 
-    /* ── Hero ────────────────────────────────────────────── */
-    .hero { flex: 0 0 auto; }
+    /* ── Header ──────────────────────────────────────────── */
+    .panel-head {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .head-right {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .head-right .mono { color: var(--muted); font-size: 11px; }
+    .hero { flex: 1 1 auto; min-width: 0; }
     .hero-label {
       font-size: 11px;
       font-weight: 600;
       letter-spacing: 1.4px;
       text-transform: uppercase;
       color: var(--muted);
+      margin-bottom: 2px;
     }
-    .hero-row {
+    .hero-headline {
       display: flex;
-      align-items: baseline;
+      align-items: center;
       flex-wrap: wrap;
-      gap: 6px 12px;
-      margin-top: 4px;
+      gap: 4px 14px;
+      margin-top: 2px;
+    }
+    .hero-num-wrap {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 6px;
     }
     .hero-num {
-      font-size: clamp(36px, 12vw, 58px);
+      font-size: clamp(26px, 7vw, 42px);
       font-weight: 700;
-      letter-spacing: -1.5px;
+      letter-spacing: -1px;
       line-height: 1;
       color: var(--ink);
     }
-    .hero-unit { font-size: 16px; font-weight: 600; color: var(--muted); }
+    .hero-unit { font-size: 14px; font-weight: 600; color: var(--muted); }
+    .hero-pills {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+    }
     .delta {
       display: inline-flex;
       align-items: center;
       gap: 5px;
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 700;
-      padding: 4px 10px;
+      padding: 3px 9px;
       border-radius: 999px;
       letter-spacing: 0.2px;
     }
     .delta.good { color: var(--good); background: rgba(25, 230, 164, 0.12); }
     .delta.bad  { color: var(--bad);  background: rgba(255, 92, 92, 0.12); }
-    .delta { margin-top: 10px; }
-    .sofar { margin-top: 7px; font-size: 13px; color: var(--muted); }
+    .sofar { font-size: 13px; color: var(--muted); }
     .sofar b { color: var(--ink); font-weight: 600; }
 
     /* ── Chart ───────────────────────────────────────────── */
@@ -179,40 +209,38 @@
       display: flex;
       gap: 16px;
       justify-content: center;
-      font-size: 11.5px;
+      font-size: 12px;
       color: var(--muted);
-      padding-bottom: 4px;
+      padding: 8px 0 2px;
+      background: var(--bg);
+      border-top: 1px solid var(--card-border);
+      margin-top: 6px;
     }
     .legend span { display: inline-flex; align-items: center; gap: 6px; }
     .swatch { width: 16px; height: 0; border-top: 3px solid var(--accent); border-radius: 2px; }
-    .swatch.dash { border-top-style: dashed; border-color: var(--muted); }
+    .swatch.dotted { border-top-style: dotted; border-color: var(--accent); border-top-width: 3px; }
+    .swatch.band {
+      height: 9px; border-top: none; border-radius: 2px;
+      background: rgba(255, 193, 7, 0.18);
+      border: 1px solid rgba(184, 134, 11, 0.65);
+    }
 
-    /* ── Status ──────────────────────────────────────────── */
-    .divider { height: 1px; background: var(--card-border); margin: 10px 0; flex: 0 0 auto; }
-    .status { flex: 0 0 auto; }
+    /* ── Status pill ─────────────────────────────────────── */
     .status-pill {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      font-size: 14px;
-      font-weight: 800;
-      letter-spacing: 1.2px;
+      gap: 7px;
+      font-size: 11.5px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
       text-transform: uppercase;
       color: var(--accent);
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: var(--glow);
+      border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
     }
-    .status-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
-    .status-sub { margin-top: 5px; font-size: 14px; color: var(--muted); line-height: 1.35; }
-    .foot {
-      flex: 0 0 auto;
-      margin-top: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      font-size: 11px;
-      color: var(--faint);
-    }
-    .foot .mono { color: var(--muted); }
+    .status-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
 
     /* ── Overlay ─────────────────────────────────────────── */
     .center-msg {
@@ -236,6 +264,36 @@
       animation: spin 0.9s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* On narrow screens drop the verbose timestamp so the refresh button still
+       fits in the top-right corner. Layout collapses to chart-first: small hero
+       number, pills side-by-side under it, "so far" on its own line below. */
+    @media (max-width: 560px) {
+      body {
+        padding:
+          max(8px, env(safe-area-inset-top))
+          max(10px, env(safe-area-inset-right))
+          max(8px, env(safe-area-inset-bottom))
+          max(10px, env(safe-area-inset-left));
+      }
+      .topbar { margin-bottom: 8px; }
+      .panel { border-radius: 14px; padding: 12px 12px 8px; }
+      .head-right .mono { display: none; }
+      .hero-num { font-size: clamp(24px, 8vw, 32px); }
+      .hero-unit { font-size: 12px; }
+      .hero-headline {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+      }
+      .hero-pills {
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .sofar { font-size: 12px; }
+      .legend { gap: 12px; font-size: 11.5px; }
+    }
   </style>
 </head>
 <body>
@@ -245,14 +303,27 @@
   </div>
 
   <div class="panel">
-    <div id="hero" class="hero" style="visibility:hidden">
-      <div class="hero-label">Projected this cycle</div>
-      <div class="hero-row">
-        <span id="heroNum" class="hero-num mono">—</span>
-        <span class="hero-unit">kWh</span>
+    <div class="panel-head">
+      <div id="hero" class="hero" style="visibility:hidden">
+        <div class="hero-label">Projected this cycle</div>
+        <div class="hero-headline">
+          <span class="hero-num-wrap">
+            <span id="heroNum" class="hero-num mono">—</span>
+            <span class="hero-unit">kWh</span>
+          </span>
+          <div class="hero-pills">
+            <div id="delta" class="delta"></div>
+            <div id="statusPill" class="status-pill" style="display:none"></div>
+          </div>
+          <span id="sofar" class="sofar"></span>
+        </div>
       </div>
-      <div id="delta" class="delta"></div>
-      <div id="sofar" class="sofar"></div>
+      <div class="head-right">
+        <span id="footText" class="mono"></span>
+        <button id="refreshBtn" class="refresh-btn" type="button" aria-label="Refresh data">
+          <span class="refresh-icon">↻</span>Refresh
+        </button>
+      </div>
     </div>
 
     <div class="chart-wrap">
@@ -262,16 +333,9 @@
 
     <div id="legend" class="legend" style="display:none">
       <span><span class="swatch"></span>So far</span>
-      <span><span class="swatch dash"></span>Projected</span>
-    </div>
-
-    <div class="divider"></div>
-    <div id="status" class="status"></div>
-    <div class="foot">
-      <span id="footText" class="mono"></span>
-      <button id="refreshBtn" class="refresh-btn" type="button" aria-label="Refresh data">
-        <span class="refresh-icon">↻</span>Refresh
-      </button>
+      <span><span class="swatch dotted"></span>Projected</span>
+      <span><span class="swatch band"></span>Temp range</span>
+      <span>💧 Rain</span>
     </div>
   </div>
 
@@ -300,18 +364,11 @@
         '<div>' + text + '</div>';
     }
 
-    /** Map the server verdict to accent color + human copy. */
+    /** Map the server verdict to accent color + short status label. */
     function verdictTheme(d) {
-      if (d.verdict === 'LIKELY CLEAR') {
-        return { accent: COLORS.good, status: 'Credit Secure',
-                 sub: "On track to bank the $" + d.creditUsd + " credit." };
-      }
-      if (d.verdict === 'CLOSE') {
-        return { accent: COLORS.warn, status: 'Cutting It Close',
-                 sub: 'Just over the line — keep it steady.' };
-      }
-      return { accent: COLORS.bad, status: 'At Risk',
-               sub: "Might fall short — it's OK to use a little more." };
+      if (d.verdict === 'LIKELY CLEAR') return { accent: COLORS.good, status: 'Credit Secure' };
+      if (d.verdict === 'CLOSE') return { accent: COLORS.warn, status: 'Cutting It Close' };
+      return { accent: COLORS.bad, status: 'At Risk' };
     }
 
     function renderHeader(d, theme) {
@@ -324,27 +381,25 @@
       delta.className = 'delta ' + (over ? 'good' : 'bad');
       delta.textContent = (over ? '▲ +' : '▼ −') + fmt(Math.abs(m)) + ' kWh vs goal';
 
-      // "So far" = last real reading on the cumulative line.
+      // Status chip sits inline beside the delta.
+      var statusPill = document.getElementById('statusPill');
+      statusPill.innerHTML = '<span class="dot"></span>' + theme.status;
+      statusPill.style.display = 'inline-flex';
+
+      // "So far" = last real reading on the cumulative line, shown against the goal.
       var sofar = null;
       for (var i = d.actualCumulative.length - 1; i >= 0; i--) {
         if (d.actualCumulative[i] != null) { sofar = d.actualCumulative[i]; break; }
       }
       var sofarEl = document.getElementById('sofar');
       sofarEl.innerHTML = sofar != null
-        ? '<b>' + fmt(sofar) + '</b> kWh used so far'
+        ? '<b>' + fmt(sofar) + '</b>/' + d.threshold.toLocaleString() + ' kWh used so far'
         : '';
 
       document.getElementById('hero').style.visibility = 'visible';
       document.getElementById('live').classList.add('show');
 
-      var statusEl = document.getElementById('status');
-      statusEl.innerHTML =
-        '<div class="status-pill"><span class="dot"></span>' + theme.status + '</div>' +
-        '<div class="status-sub">' + theme.sub + '</div>';
-
-      var foot = 'Goal ' + d.threshold.toLocaleString() + ' kWh · $' + d.creditUsd + ' credit';
-      if (d.lastUpdated) foot += ' · Updated ' + d.lastUpdated;
-      document.getElementById('footText').textContent = foot;
+      document.getElementById('footText').textContent = d.lastUpdated ? 'Updated ' + d.lastUpdated : '';
     }
 
     function renderChart(d, accent) {
@@ -372,11 +427,45 @@
         }
       };
 
+      // Mark each forecast rain day with a faint blue column + a 💧 at the top.
+      // Drop size scales with precip (10 px at trace amounts, up to 22 px ≈ 1.5×
+      // the previous fixed 15 px at the heaviest forecast day).
+      var rainPlugin = {
+        id: 'rainDrops',
+        afterDatasetsDraw: function (chart) {
+          if (!d.rain) return;
+          var xScale = chart.scales.x;
+          var area = chart.chartArea;
+          var c = chart.ctx;
+          var MIN_PX = 10, MAX_PX = 22, CAP_IN = 1.5;
+          c.save();
+          d.rain.forEach(function (val, i) {
+            if (val == null) return;
+            var x = xScale.getPixelForValue(i);
+            c.strokeStyle = 'rgba(96, 175, 255, 0.28)';
+            c.lineWidth = 1;
+            c.setLineDash([2, 3]);
+            c.beginPath();
+            c.moveTo(x, area.top + 16);
+            c.lineTo(x, area.bottom);
+            c.stroke();
+            c.setLineDash([]);
+            var t = Math.min(val, CAP_IN) / CAP_IN;
+            var size = MIN_PX + (MAX_PX - MIN_PX) * t;
+            c.font = size.toFixed(1) + 'px sans-serif';
+            c.textAlign = 'center';
+            c.textBaseline = 'top';
+            c.fillText('💧', x, area.top);
+          });
+          c.restore();
+        }
+      };
+
       var ctx = document.getElementById('usageChart').getContext('2d');
       if (chart) chart.destroy();  // avoid stacking instances on refresh
       chart = new Chart(ctx, {
         type: 'line',
-        plugins: [glowPlugin],
+        plugins: [glowPlugin, rainPlugin],
         data: {
           labels: d.labels,
           datasets: [
@@ -386,7 +475,7 @@
               borderColor: accent,
               borderWidth: 3,
               tension: 0.25,
-              spanGaps: false,
+              spanGaps: true,
               fill: true,
               pointRadius: pointRadius,
               pointBackgroundColor: accent,
@@ -397,6 +486,9 @@
                 if (!area) return 'transparent';
                 var g = c.chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
                 g.addColorStop(0, withAlpha(accent, 0.32));
+                // Fade out by the chart midline so the gradient doesn't tint the
+                // legend strip below the chart (it sits on top of var(--bg)).
+                g.addColorStop(0.55, withAlpha(accent, 0));
                 g.addColorStop(1, withAlpha(accent, 0));
                 return g;
               }
@@ -404,13 +496,39 @@
             {
               label: 'Projected',
               data: d.projectedCumulative,
-              borderColor: withAlpha('#9aa6b5', 0.85),
+              borderColor: accent,
               borderWidth: 2.5,
-              borderDash: [7, 6],
+              borderDash: [2, 5],
+              borderCapStyle: 'round',
               tension: 0.25,
               spanGaps: true,
               fill: false,
               pointRadius: 0
+            },
+            {
+              label: 'High',
+              data: d.tempMax,
+              yAxisID: 'y1',
+              borderColor: 'rgba(184, 134, 11, 0.65)',
+              borderWidth: 1,
+              tension: 0.35,
+              spanGaps: true,
+              pointRadius: 0,
+              order: 2,           // drawn behind the kWh lines
+              fill: '+1',         // shade down to the Low line → daily temp band
+              backgroundColor: 'rgba(255, 193, 7, 0.18)'
+            },
+            {
+              label: 'Low',
+              data: d.tempMin,
+              yAxisID: 'y1',
+              borderColor: 'rgba(184, 134, 11, 0.65)',
+              borderWidth: 1,
+              tension: 0.35,
+              spanGaps: true,
+              pointRadius: 0,
+              fill: false,
+              order: 2
             }
           ]
         },
@@ -433,7 +551,13 @@
               callbacks: {
                 label: function (item) {
                   if (item.parsed.y == null) return null;
+                  if (item.dataset.yAxisID === 'y1') return item.dataset.label + ': ' + Math.round(item.parsed.y) + '°F';
                   return item.dataset.label + ': ' + fmt(item.parsed.y) + ' kWh';
+                },
+                afterBody: function (items) {
+                  if (!items.length || !d.rain) return '';
+                  var i = items[0].dataIndex;
+                  return d.rain[i] != null ? '💧 Rain ~' + d.rain[i] + ' in' : '';
                 }
               }
             },
@@ -443,19 +567,9 @@
                   type: 'line',
                   yMin: d.threshold,
                   yMax: d.threshold,
-                  borderColor: 'rgba(233, 238, 245, 0.45)',
-                  borderWidth: 1.5,
-                  borderDash: [5, 5],
-                  label: {
-                    display: true,
-                    content: d.threshold.toLocaleString() + ' kWh goal',
-                    position: 'start',
-                    color: '#e9eef5',
-                    backgroundColor: 'rgba(255, 255, 255, 0.10)',
-                    borderRadius: 6,
-                    font: { size: 11, weight: 'bold' },
-                    padding: { top: 3, bottom: 3, left: 6, right: 6 }
-                  }
+                  borderColor: 'rgba(255, 92, 92, 0.75)',
+                  borderWidth: 1.8,
+                  borderDash: [5, 5]
                 }
               }
             }
@@ -466,7 +580,29 @@
               suggestedMax: suggestedMax,
               border: { display: false },
               grid: { color: 'rgba(255, 255, 255, 0.06)', drawTicks: false },
-              ticks: { color: '#7c8a9c', font: { size: 11 }, padding: 8, maxTicksLimit: 5 }
+              ticks: {
+                font: { size: 11 },
+                padding: 8,
+                maxTicksLimit: 5,
+                // Highlight the threshold tick (1,000 kWh) in red to match the
+                // dashed goal line, since the in-chart label has been removed.
+                color: function (ctx) {
+                  return ctx.tick && ctx.tick.value === d.threshold ? '#ff5c5c' : '#7c8a9c';
+                }
+              }
+            },
+            y1: {
+              position: 'right',
+              beginAtZero: false,
+              border: { display: false },
+              grid: { drawOnChartArea: false },
+              ticks: {
+                color: 'rgba(184, 134, 11, 0.95)',
+                font: { size: 11 },
+                padding: 6,
+                maxTicksLimit: 5,
+                callback: function (v) { return Math.round(v) + '°'; }
+              }
             },
             x: {
               border: { display: false },
