@@ -43,8 +43,12 @@ The script must be bound to the Sheet (so the ⚡ menu and `getActive()` work).
 8. **Deploy → New deployment → Web app**: *Execute as: Me*, *Who has access: Anyone* → copy the
    URL and bookmark it on grandma's device.
 
-A daily time trigger (`runDailyUpdate`, ~7am CT) is installed by `setup()` to keep the
-Sheet fresh; the web app only reads the precomputed Sheet, so it loads fast.
+A recurring time trigger (`runDailyUpdate`, every `REFRESH_INTERVAL_HOURS` — default
+**2h**) is installed by `setup()` to keep the Sheet fresh; the web app only reads the
+precomputed Sheet, so it loads fast. The dashboard also has a **↻ refresh button**
+(top-right) that runs the full pipeline on demand — handy on a phone, where the ⚡ Sheet
+menu isn't reachable. Re-run `setup()` after changing the interval; it reconciles the
+trigger (deletes the old one, installs the new cadence).
 
 ## One-time backfill
 SMT *daily emails* cover roughly 5/19 onward. The 5/11–5/18 week came from a portal

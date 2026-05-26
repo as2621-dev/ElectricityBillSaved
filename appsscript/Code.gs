@@ -3,9 +3,19 @@
  *
  * Web app:   doGet -> Index.html (graph-first, read-only, anonymous access).
  * Pipeline:  runDailyUpdate -> importUsageFromGmail -> refreshWeather -> computeProjection
- *            (runs on a daily time trigger; also from the ⚡ Electricity sheet menu).
+ *            (runs on a recurring time trigger; also from the ⚡ Electricity sheet
+ *            menu or the dashboard's refresh button).
  * Storage:   tabs Config, DailyUsage, Weather, Projection, Summary on the bound Sheet.
  */
+
+/**
+ * How often the recurring trigger runs the pipeline, in hours.
+ * Apps Script's everyHours() only accepts 1, 2, 4, 6, 8, or 12 — any other
+ * value throws when the trigger is created. SMT email lands once a day (in the
+ * evening), so checking every couple of hours keeps the dashboard fresh without
+ * burning quota. Bump to 4 if you want fewer runs.
+ */
+var REFRESH_INTERVAL_HOURS = 2;
 
 // ─── Entry points ──────────────────────────────────────────────────────────
 
@@ -35,7 +45,7 @@ function onOpen() {
 function setup() {
   getSpreadsheet_().setSpreadsheetTimeZone('America/Chicago');
   ensureInitialized_();
-  installDailyTrigger_();
+  installRefreshTrigger_();
   logEvent_('setup_completed', {});
   try { getSpreadsheet_().toast('Setup complete. Use ⚡ Electricity → Refresh now.', 'Electricity Dashboard', 5); } catch (e) {}
 }
@@ -52,8 +62,10 @@ function ensureInitialized_() {
   if (config.getLastRow() < 2) {
     writeKeyValues_('Config', {
       zip: '77080',
-      cycle_start: '2026-05-11',
-      next_read: '2026-06-10',
+      cycle_start: '2026-05-10',
+      // 28-day window (read-date estimate ~6/10): closing early is deliberate —
+      // it tests whether we clear 1,000 kWh even if CenterPoint reads a few days early.
+      next_read: '2026-06-07',
       threshold_kwh: 1000,
       credit_usd: 125,
       cdd_base_f: 65
@@ -142,14 +154,17 @@ function getDashboardData() {
 
 // ─── Triggers ────────────────────────────────────────────────────────────────
 
-/** Install the once-daily trigger for runDailyUpdate if not already present. */
-function installDailyTrigger_() {
-  var exists = ScriptApp.getProjectTriggers().some(function (t) {
-    return t.getHandlerFunction() === 'runDailyUpdate';
+/**
+ * Reconcile the recurring trigger for runDailyUpdate: delete any existing ones,
+ * then (re)install at REFRESH_INTERVAL_HOURS. Reconciling rather than
+ * "create only if missing" means re-running setup() actually changes the
+ * interval (e.g. migrating an older once-daily trigger to every few hours).
+ */
+function installRefreshTrigger_() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'runDailyUpdate') ScriptApp.deleteTrigger(t);
   });
-  if (!exists) {
-    ScriptApp.newTrigger('runDailyUpdate').timeBased().everyDays(1).atHour(7).create();
-  }
+  ScriptApp.newTrigger('runDailyUpdate').timeBased().everyHours(REFRESH_INTERVAL_HOURS).create();
 }
 
 // ─── Sheet helpers ────────────────────────────────────────────────────────────

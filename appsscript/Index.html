@@ -3,160 +3,437 @@
 <head>
   <base target="_top">
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Electricity Dashboard</title>
   <style>
     :root {
-      --ink: #202124;
-      --muted: #5f6368;
-      --green: #188038;
-      --amber: #b06000;
-      --red: #c5221f;
-      --bg: #ffffff;
+      --bg: #0a0e15;
+      --ink: #e9eef5;
+      --muted: #7c8a9c;
+      --faint: #54607180;
+      --grid: rgba(255, 255, 255, 0.06);
+      --card: rgba(255, 255, 255, 0.035);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --good: #19e6a4;
+      --warn: #ffb020;
+      --bad: #ff5c5c;
+      /* Overridden from JS once the verdict is known. */
+      --accent: #19e6a4;
+      --glow: rgba(25, 230, 164, 0.10);
     }
-    * { box-sizing: border-box; }
+
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body { margin: 0; height: 100%; }
     body {
-      font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      overflow-x: hidden;
+      font-family: -apple-system, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       color: var(--ink);
-      background: var(--bg);
+      background:
+        radial-gradient(125% 65% at 50% -5%, var(--glow), transparent 60%),
+        var(--bg);
       display: flex;
       flex-direction: column;
-      padding: 16px 18px 12px;
+      padding:
+        max(16px, env(safe-area-inset-top))
+        max(16px, env(safe-area-inset-right))
+        max(14px, env(safe-area-inset-bottom))
+        max(16px, env(safe-area-inset-left));
+      -webkit-font-smoothing: antialiased;
     }
-    .title {
-      font-size: 18px;
+
+    .mono {
+      font-family: "SF Mono", ui-monospace, "Roboto Mono", Menlo, Consolas, monospace;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ── Top bar ─────────────────────────────────────────── */
+    .topbar {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .brand {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 1.6px;
+      text-transform: uppercase;
       color: var(--muted);
-      font-weight: 600;
-      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
     }
+    .brand .bolt { color: var(--accent); font-size: 14px; }
+    .live {
+      display: none;
+      align-items: center;
+      gap: 6px;
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 1.4px;
+      text-transform: uppercase;
+      color: var(--accent);
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--glow);
+      border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    }
+    .live.show { display: inline-flex; }
+    .refresh-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex: 0 0 auto;
+      padding: 7px 13px;
+      border-radius: 999px;
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1;
+      cursor: pointer;
+      transition: color 0.2s, border-color 0.2s;
+    }
+    .refresh-btn:active {
+      color: var(--accent);
+      border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+    }
+    .refresh-btn:disabled { opacity: 0.5; cursor: default; }
+    .refresh-icon { display: inline-block; font-size: 14px; line-height: 1; }
+    .refresh-btn.spinning .refresh-icon { animation: spin 0.9s linear infinite; }
+    .live .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--accent);
+      animation: pulse 1.7s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; box-shadow: 0 0 0 0 var(--glow); }
+      50%      { opacity: 0.35; box-shadow: 0 0 0 5px transparent; }
+    }
+
+    /* ── Panel ───────────────────────────────────────────── */
+    .panel {
+      flex: 1 1 auto;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      padding: 18px 16px 14px;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+
+    /* ── Hero ────────────────────────────────────────────── */
+    .hero { flex: 0 0 auto; }
+    .hero-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 1.4px;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .hero-row {
+      display: flex;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 6px 12px;
+      margin-top: 4px;
+    }
+    .hero-num {
+      font-size: clamp(36px, 12vw, 58px);
+      font-weight: 700;
+      letter-spacing: -1.5px;
+      line-height: 1;
+      color: var(--ink);
+    }
+    .hero-unit { font-size: 16px; font-weight: 600; color: var(--muted); }
+    .delta {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 999px;
+      letter-spacing: 0.2px;
+    }
+    .delta.good { color: var(--good); background: rgba(25, 230, 164, 0.12); }
+    .delta.bad  { color: var(--bad);  background: rgba(255, 92, 92, 0.12); }
+    .delta { margin-top: 10px; }
+    .sofar { margin-top: 7px; font-size: 13px; color: var(--muted); }
+    .sofar b { color: var(--ink); font-weight: 600; }
+
+    /* ── Chart ───────────────────────────────────────────── */
     .chart-wrap {
       flex: 1 1 auto;
-      min-height: 240px;
       position: relative;
+      min-height: 200px;
+      margin: 12px 0 6px;
     }
-    .status {
+    .legend {
       flex: 0 0 auto;
-      text-align: center;
-      padding: 14px 8px 6px;
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      font-size: 11.5px;
+      color: var(--muted);
+      padding-bottom: 4px;
     }
-    .status .headline {
-      font-size: clamp(22px, 6vw, 38px);
+    .legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .swatch { width: 16px; height: 0; border-top: 3px solid var(--accent); border-radius: 2px; }
+    .swatch.dash { border-top-style: dashed; border-color: var(--muted); }
+
+    /* ── Status ──────────────────────────────────────────── */
+    .divider { height: 1px; background: var(--card-border); margin: 10px 0; flex: 0 0 auto; }
+    .status { flex: 0 0 auto; }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
       font-weight: 800;
-      line-height: 1.15;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+      color: var(--accent);
     }
-    .status .sub {
-      font-size: clamp(15px, 3.6vw, 20px);
-      color: var(--muted);
-      margin-top: 6px;
-    }
-    .ok { color: var(--green); }
-    .warn { color: var(--amber); }
-    .bad { color: var(--red); }
-    .caption {
+    .status-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+    .status-sub { margin-top: 5px; font-size: 14px; color: var(--muted); line-height: 1.35; }
+    .foot {
       flex: 0 0 auto;
-      text-align: center;
-      font-size: 12px;
-      color: var(--muted);
-      margin-top: 8px;
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 11px;
+      color: var(--faint);
     }
+    .foot .mono { color: var(--muted); }
+
+    /* ── Overlay ─────────────────────────────────────────── */
     .center-msg {
       position: absolute;
       inset: 0;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
+      gap: 14px;
       color: var(--muted);
-      font-size: 18px;
+      font-size: 15px;
       text-align: center;
-      padding: 0 20px;
+      padding: 0 18px;
     }
+    .spinner {
+      width: 26px; height: 26px;
+      border: 3px solid var(--card-border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
-  <div class="title">This month's electricity</div>
-  <div class="chart-wrap">
-    <canvas id="usageChart"></canvas>
-    <div id="overlay" class="center-msg">Loading…</div>
+  <div class="topbar">
+    <div class="brand"><span class="bolt">⚡</span>Cycle Usage</div>
+    <div id="live" class="live"><span class="dot"></span>Live</div>
   </div>
-  <div id="status" class="status"></div>
-  <div id="caption" class="caption"></div>
+
+  <div class="panel">
+    <div id="hero" class="hero" style="visibility:hidden">
+      <div class="hero-label">Projected this cycle</div>
+      <div class="hero-row">
+        <span id="heroNum" class="hero-num mono">—</span>
+        <span class="hero-unit">kWh</span>
+      </div>
+      <div id="delta" class="delta"></div>
+      <div id="sofar" class="sofar"></div>
+    </div>
+
+    <div class="chart-wrap">
+      <canvas id="usageChart"></canvas>
+      <div id="overlay" class="center-msg"><div class="spinner"></div>Loading…</div>
+    </div>
+
+    <div id="legend" class="legend" style="display:none">
+      <span><span class="swatch"></span>So far</span>
+      <span><span class="swatch dash"></span>Projected</span>
+    </div>
+
+    <div class="divider"></div>
+    <div id="status" class="status"></div>
+    <div class="foot">
+      <span id="footText" class="mono"></span>
+      <button id="refreshBtn" class="refresh-btn" type="button" aria-label="Refresh data">
+        <span class="refresh-icon">↻</span>Refresh
+      </button>
+    </div>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
   <script>
-    function setOverlay(text) {
+    var COLORS = { good: '#19e6a4', warn: '#ffb020', bad: '#ff5c5c' };
+    var chart = null;  // current Chart.js instance, destroyed before each re-render
+
+    /** Convert "#rrggbb" + alpha into an rgba() string. */
+    function withAlpha(hex, alpha) {
+      var h = hex.replace('#', '');
+      var r = parseInt(h.substring(0, 2), 16);
+      var g = parseInt(h.substring(2, 4), 16);
+      var b = parseInt(h.substring(4, 6), 16);
+      return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+    }
+
+    function fmt(n) { return Math.round(n).toLocaleString(); }
+
+    function setOverlay(text, spin) {
       var el = document.getElementById('overlay');
       if (!text) { el.style.display = 'none'; return; }
       el.style.display = 'flex';
-      el.textContent = text;
+      el.innerHTML = (spin ? '<div class="spinner"></div>' : '') +
+        '<div>' + text + '</div>';
     }
 
-    function renderStatus(d) {
-      var statusEl = document.getElementById('status');
-      var marginAbs = Math.abs(Math.round(d.margin));
-      var overUnder = d.margin >= 0 ? (marginAbs + ' kWh over the goal') : (marginAbs + ' kWh under the goal');
-      var cls, headline, sub;
-
+    /** Map the server verdict to accent color + human copy. */
+    function verdictTheme(d) {
       if (d.verdict === 'LIKELY CLEAR') {
-        cls = 'ok';
-        headline = 'On track for the $' + d.creditUsd + ' credit';
-        sub = Math.round(d.projectedTotal) + ' kWh projected · ' + overUnder;
-      } else if (d.verdict === 'CLOSE') {
-        cls = 'warn';
-        headline = 'Just over the goal — keep it up';
-        sub = Math.round(d.projectedTotal) + ' kWh projected · ' + overUnder;
-      } else {
-        cls = 'bad';
-        headline = 'May miss the $' + d.creditUsd + ' credit';
-        sub = "It's OK to use a little more · " + Math.round(d.projectedTotal) + ' kWh projected · ' + overUnder;
+        return { accent: COLORS.good, status: 'Credit Secure',
+                 sub: "On track to bank the $" + d.creditUsd + " credit." };
       }
-      statusEl.innerHTML = '<div class="headline ' + cls + '">' + headline + '</div>' +
-        '<div class="sub">' + sub + '</div>';
+      if (d.verdict === 'CLOSE') {
+        return { accent: COLORS.warn, status: 'Cutting It Close',
+                 sub: 'Just over the line — keep it steady.' };
+      }
+      return { accent: COLORS.bad, status: 'At Risk',
+               sub: "Might fall short — it's OK to use a little more." };
     }
 
-    function renderChart(d) {
-      var suggestedMax = Math.max(d.threshold * 1.1, d.projectedTotal * 1.1, d.threshold + 50);
+    function renderHeader(d, theme) {
+      // Hero number = projected cycle total (the figure that decides the credit).
+      document.getElementById('heroNum').textContent = fmt(d.projectedTotal);
+
+      var m = Math.round(d.margin);
+      var over = m >= 0;
+      var delta = document.getElementById('delta');
+      delta.className = 'delta ' + (over ? 'good' : 'bad');
+      delta.textContent = (over ? '▲ +' : '▼ −') + fmt(Math.abs(m)) + ' kWh vs goal';
+
+      // "So far" = last real reading on the cumulative line.
+      var sofar = null;
+      for (var i = d.actualCumulative.length - 1; i >= 0; i--) {
+        if (d.actualCumulative[i] != null) { sofar = d.actualCumulative[i]; break; }
+      }
+      var sofarEl = document.getElementById('sofar');
+      sofarEl.innerHTML = sofar != null
+        ? '<b>' + fmt(sofar) + '</b> kWh used so far'
+        : '';
+
+      document.getElementById('hero').style.visibility = 'visible';
+      document.getElementById('live').classList.add('show');
+
+      var statusEl = document.getElementById('status');
+      statusEl.innerHTML =
+        '<div class="status-pill"><span class="dot"></span>' + theme.status + '</div>' +
+        '<div class="status-sub">' + theme.sub + '</div>';
+
+      var foot = 'Goal ' + d.threshold.toLocaleString() + ' kWh · $' + d.creditUsd + ' credit';
+      if (d.lastUpdated) foot += ' · Updated ' + d.lastUpdated;
+      document.getElementById('footText').textContent = foot;
+    }
+
+    function renderChart(d, accent) {
+      var suggestedMax = Math.max(d.threshold * 1.12, d.projectedTotal * 1.12, d.threshold + 50);
+
+      // Mark "now" — the last real reading — with a glowing dot.
+      var lastActualIdx = -1;
+      for (var i = 0; i < d.actualCumulative.length; i++) {
+        if (d.actualCumulative[i] != null) lastActualIdx = i;
+      }
+      var pointRadius = d.actualCumulative.map(function (_, i) { return i === lastActualIdx ? 5 : 0; });
+
+      // Soft glow under the live line, color-matched to the verdict.
+      var glowPlugin = {
+        id: 'lineGlow',
+        beforeDatasetDraw: function (chart, args) {
+          if (args.index === 0) {
+            chart.ctx.save();
+            chart.ctx.shadowColor = withAlpha(accent, 0.55);
+            chart.ctx.shadowBlur = 10;
+          }
+        },
+        afterDatasetDraw: function (chart, args) {
+          if (args.index === 0) chart.ctx.restore();
+        }
+      };
+
       var ctx = document.getElementById('usageChart').getContext('2d');
-      new Chart(ctx, {
+      if (chart) chart.destroy();  // avoid stacking instances on refresh
+      chart = new Chart(ctx, {
         type: 'line',
+        plugins: [glowPlugin],
         data: {
           labels: d.labels,
           datasets: [
             {
               label: 'So far',
               data: d.actualCumulative,
-              borderColor: '#1a73e8',
-              backgroundColor: '#1a73e8',
-              borderWidth: 4,
-              pointRadius: 0,
-              tension: 0.15,
-              spanGaps: false
+              borderColor: accent,
+              borderWidth: 3,
+              tension: 0.25,
+              spanGaps: false,
+              fill: true,
+              pointRadius: pointRadius,
+              pointBackgroundColor: accent,
+              pointBorderColor: '#0a0e15',
+              pointBorderWidth: 2,
+              backgroundColor: function (c) {
+                var area = c.chart.chartArea;
+                if (!area) return 'transparent';
+                var g = c.chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+                g.addColorStop(0, withAlpha(accent, 0.32));
+                g.addColorStop(1, withAlpha(accent, 0));
+                return g;
+              }
             },
             {
               label: 'Projected',
               data: d.projectedCumulative,
-              borderColor: '#9aa0a6',
-              backgroundColor: '#9aa0a6',
-              borderWidth: 3,
-              borderDash: [8, 6],
-              pointRadius: 0,
-              tension: 0.15,
-              spanGaps: true
+              borderColor: withAlpha('#9aa6b5', 0.85),
+              borderWidth: 2.5,
+              borderDash: [7, 6],
+              tension: 0.25,
+              spanGaps: true,
+              fill: false,
+              pointRadius: 0
             }
           ]
         },
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          animation: { duration: 700, easing: 'easeOutQuart' },
           interaction: { intersect: false, mode: 'index' },
           plugins: {
-            legend: { labels: { font: { size: 16 }, boxWidth: 24, usePointStyle: false } },
+            legend: { display: false },
             tooltip: {
+              backgroundColor: 'rgba(12, 17, 25, 0.95)',
+              borderColor: withAlpha(accent, 0.5),
+              borderWidth: 1,
+              titleColor: '#e9eef5',
+              bodyColor: '#c2cbd6',
+              padding: 10,
+              cornerRadius: 8,
+              displayColors: false,
               callbacks: {
                 label: function (item) {
                   if (item.parsed.y == null) return null;
-                  return item.dataset.label + ': ' + Math.round(item.parsed.y) + ' kWh';
+                  return item.dataset.label + ': ' + fmt(item.parsed.y) + ' kWh';
                 }
               }
             },
@@ -166,16 +443,18 @@
                   type: 'line',
                   yMin: d.threshold,
                   yMax: d.threshold,
-                  borderColor: '#d93025',
-                  borderWidth: 2,
-                  borderDash: [4, 4],
+                  borderColor: 'rgba(233, 238, 245, 0.45)',
+                  borderWidth: 1.5,
+                  borderDash: [5, 5],
                   label: {
                     display: true,
                     content: d.threshold.toLocaleString() + ' kWh goal',
-                    position: 'end',
-                    color: '#fff',
-                    backgroundColor: '#d93025',
-                    font: { size: 13, weight: 'bold' }
+                    position: 'start',
+                    color: '#e9eef5',
+                    backgroundColor: 'rgba(255, 255, 255, 0.10)',
+                    borderRadius: 6,
+                    font: { size: 11, weight: 'bold' },
+                    padding: { top: 3, bottom: 3, left: 6, right: 6 }
                   }
                 }
               }
@@ -185,11 +464,14 @@
             y: {
               beginAtZero: true,
               suggestedMax: suggestedMax,
-              title: { display: true, text: 'kWh this month', font: { size: 15 } },
-              ticks: { font: { size: 14 } }
+              border: { display: false },
+              grid: { color: 'rgba(255, 255, 255, 0.06)', drawTicks: false },
+              ticks: { color: '#7c8a9c', font: { size: 11 }, padding: 8, maxTicksLimit: 5 }
             },
             x: {
-              ticks: { font: { size: 13 }, autoSkip: true, maxTicksLimit: 8, maxRotation: 0 }
+              border: { display: false },
+              grid: { display: false },
+              ticks: { color: '#7c8a9c', font: { size: 11 }, autoSkip: true, maxTicksLimit: 6, maxRotation: 0 }
             }
           }
         }
@@ -198,21 +480,60 @@
 
     function render(d) {
       if (!d || !d.labels || !d.labels.length) {
-        setOverlay('No data yet. In the Sheet, use ⚡ Electricity → Refresh now.');
+        document.getElementById('legend').style.display = 'none';
+        setOverlay('No data yet. Tap ↻ to refresh.', false);
         return;
       }
+      var theme = verdictTheme(d);
+      document.documentElement.style.setProperty('--accent', theme.accent);
+      document.documentElement.style.setProperty('--glow', withAlpha(theme.accent, 0.10));
+
       setOverlay('');
-      renderChart(d);
-      renderStatus(d);
-      document.getElementById('caption').textContent = d.lastUpdated ? ('Updated ' + d.lastUpdated) : '';
+      renderHeader(d, theme);
+      renderChart(d, theme.accent);
+      document.getElementById('legend').style.display = 'flex';
     }
 
     function showError(err) {
-      setOverlay('Could not load data. Please try again later.');
+      document.getElementById('legend').style.display = 'none';
+      setOverlay('Could not load data. Please try again later.', false);
       console.error(err);
     }
 
-    google.script.run.withSuccessHandler(render).withFailureHandler(showError).getDashboardData();
+    /** Fetch the latest precomputed dashboard payload and render it. */
+    function loadDashboard() {
+      google.script.run.withSuccessHandler(render).withFailureHandler(showError).getDashboardData();
+    }
+
+    function endRefresh() {
+      var btn = document.getElementById('refreshBtn');
+      btn.disabled = false;
+      btn.classList.remove('spinning');
+    }
+
+    /**
+     * Manual refresh: run the full server pipeline (import → weather → project),
+     * then reload the dashboard. Two round trips because runDailyUpdate returns
+     * the summary, not the chart payload.
+     */
+    function refreshNow() {
+      var btn = document.getElementById('refreshBtn');
+      btn.disabled = true;
+      btn.classList.add('spinning');
+      setOverlay('Refreshing…', true);
+      google.script.run
+        .withSuccessHandler(function () {
+          google.script.run
+            .withSuccessHandler(function (d) { render(d); endRefresh(); })
+            .withFailureHandler(function (e) { showError(e); endRefresh(); })
+            .getDashboardData();
+        })
+        .withFailureHandler(function (e) { showError(e); endRefresh(); })
+        .runDailyUpdate();
+    }
+
+    document.getElementById('refreshBtn').addEventListener('click', refreshNow);
+    loadDashboard();
   </script>
 </body>
 </html>
