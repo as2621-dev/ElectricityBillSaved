@@ -12,7 +12,7 @@
 var ZIPPOPOTAM_URL = 'https://api.zippopotam.us/us/';
 var OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
 var OPEN_METEO_ARCHIVE_URL = 'https://archive-api.open-meteo.com/v1/archive';
-var DAILY_TEMP_FIELDS = 'temperature_2m_max,temperature_2m_min';
+var DAILY_FIELDS = 'temperature_2m_max,temperature_2m_min,precipitation_sum';
 var MAX_FORECAST_DAYS = 16;
 var MAX_PAST_DAYS = 92;
 
@@ -59,19 +59,26 @@ function geocodeZip_(zipCode) {
 }
 
 /**
- * Unpack an Open-Meteo daily block into [{date, min, max}], skipping null rows.
+ * Unpack an Open-Meteo daily block into [{date, min, max, precip}], skipping null
+ * temperature rows. precip is in inches (0 when the API omits it).
  * @param {Object} data
- * @return {Array<{date: string, min: number, max: number}>}
+ * @return {Array<{date: string, min: number, max: number, precip: number}>}
  */
 function unpackDaily_(data) {
   var daily = data.daily || {};
   var times = daily.time || [];
   var maxes = daily.temperature_2m_max || [];
   var mins = daily.temperature_2m_min || [];
+  var precips = daily.precipitation_sum || [];
   var rows = [];
   for (var i = 0; i < times.length; i++) {
     if (maxes[i] == null || mins[i] == null) continue;
-    rows.push({ date: String(times[i]), min: Number(mins[i]), max: Number(maxes[i]) });
+    rows.push({
+      date: String(times[i]),
+      min: Number(mins[i]),
+      max: Number(maxes[i]),
+      precip: precips[i] == null ? 0 : Number(precips[i])
+    });
   }
   return rows;
 }
@@ -91,10 +98,11 @@ function fetchForecast_(lat, lon, days, pastDays) {
   var data = httpJson_(OPEN_METEO_FORECAST_URL, {
     latitude: lat,
     longitude: lon,
-    daily: DAILY_TEMP_FIELDS,
+    daily: DAILY_FIELDS,
     forecast_days: days,
     past_days: pastDays,
     temperature_unit: 'fahrenheit',
+    precipitation_unit: 'inch',
     timezone: 'auto'
   });
   return unpackDaily_(data);
@@ -121,7 +129,7 @@ function shiftYearIso_(iso, year) {
  * @param {string} cycleStartIso
  * @param {number} numDays
  * @param {number} lookbackYears
- * @return {Object<string, {min: number, max: number}>} keyed by "MM-DD".
+ * @return {Object<string, {min: number, max: number, precip: number}>} keyed by "MM-DD".
  */
 function fetchClimatology_(lat, lon, cycleStartIso, numDays, lookbackYears) {
   var lastFullYear = Number(todayIso_().substring(0, 4)) - 1;
@@ -132,24 +140,26 @@ function fetchClimatology_(lat, lon, cycleStartIso, numDays, lookbackYears) {
     var data = httpJson_(OPEN_METEO_ARCHIVE_URL, {
       latitude: lat,
       longitude: lon,
-      daily: DAILY_TEMP_FIELDS,
+      daily: DAILY_FIELDS,
       start_date: histStart,
       end_date: histEnd,
       temperature_unit: 'fahrenheit',
+      precipitation_unit: 'inch',
       timezone: 'auto'
     });
     unpackDaily_(data).forEach(function (row) {
       var key = row.date.substring(5);
-      if (!acc[key]) acc[key] = { minSum: 0, maxSum: 0, count: 0 };
+      if (!acc[key]) acc[key] = { minSum: 0, maxSum: 0, precipSum: 0, count: 0 };
       acc[key].minSum += row.min;
       acc[key].maxSum += row.max;
+      acc[key].precipSum += row.precip;
       acc[key].count += 1;
     });
   }
   var normals = {};
   Object.keys(acc).forEach(function (key) {
     var a = acc[key];
-    normals[key] = { min: a.minSum / a.count, max: a.maxSum / a.count };
+    normals[key] = { min: a.minSum / a.count, max: a.maxSum / a.count, precip: a.precipSum / a.count };
   });
   return normals;
 }
@@ -177,7 +187,7 @@ function refreshWeather() {
 
   var weatherMap = {};
   fetchForecast_(loc.lat, loc.lon, forecastDays, pastDays).forEach(function (row) {
-    weatherMap[row.date] = { min: row.min, max: row.max, source: 'forecast' };
+    weatherMap[row.date] = { min: row.min, max: row.max, precip: row.precip, source: 'forecast' };
   });
 
   var missing = dates.filter(function (iso) { return !weatherMap[iso]; });
@@ -185,7 +195,7 @@ function refreshWeather() {
     var normals = fetchClimatology_(loc.lat, loc.lon, startIso, dates.length, 5);
     missing.forEach(function (iso) {
       var normal = normals[iso.substring(5)];
-      if (normal) weatherMap[iso] = { min: normal.min, max: normal.max, source: 'climatology' };
+      if (normal) weatherMap[iso] = { min: normal.min, max: normal.max, precip: normal.precip, source: 'climatology' };
     });
   }
 
@@ -193,9 +203,9 @@ function refreshWeather() {
   var climatologyCount = coveredDates.filter(function (iso) { return weatherMap[iso].source === 'climatology'; }).length;
   var rows = coveredDates.map(function (iso) {
     var w = weatherMap[iso];
-    return [iso, round1_(w.min), round1_(w.max), round1_((w.min + w.max) / 2), w.source];
+    return [iso, round1_(w.min), round1_(w.max), round1_((w.min + w.max) / 2), round2_(w.precip), w.source];
   });
-  writeTable_('Weather', ['date', 'temp_min_f', 'temp_max_f', 'mean_temp_f', 'source'], rows);
+  writeTable_('Weather', ['date', 'temp_min_f', 'temp_max_f', 'mean_temp_f', 'precip_in', 'source'], rows);
 
   logEvent_('refresh_weather_completed', {
     location: loc.place + ', ' + loc.state + ' ' + loc.zip,

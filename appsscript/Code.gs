@@ -12,10 +12,11 @@
  * How often the recurring trigger runs the pipeline, in hours.
  * Apps Script's everyHours() only accepts 1, 2, 4, 6, 8, or 12 — any other
  * value throws when the trigger is created. SMT email lands once a day (in the
- * evening), so checking every couple of hours keeps the dashboard fresh without
- * burning quota. Bump to 4 if you want fewer runs.
+ * evening), so 4h gives ~6 runs/day — enough to catch the nightly email and
+ * pick up fresh weather a couple of times during the day without burning
+ * Apps Script quota.
  */
-var REFRESH_INTERVAL_HOURS = 2;
+var REFRESH_INTERVAL_HOURS = 4;
 
 // ─── Entry points ──────────────────────────────────────────────────────────
 
@@ -34,6 +35,7 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('⚡ Electricity')
     .addItem('Refresh now', 'runDailyUpdate')
+    .addItem('Repair data', 'repairDailyUsage')
     .addItem('Run setup', 'setup')
     .addToUi();
 }
@@ -59,21 +61,37 @@ function ensureInitialized_() {
   var ss = getSpreadsheet_();
   var config = ss.getSheetByName('Config') || ss.insertSheet('Config');
   config.getRange('A:B').setNumberFormat('@');  // keep dates/zip as plain text
-  if (config.getLastRow() < 2) {
-    writeKeyValues_('Config', {
-      zip: '77080',
-      cycle_start: '2026-05-10',
-      // 28-day window (read-date estimate ~6/10): closing early is deliberate —
-      // it tests whether we clear 1,000 kWh even if CenterPoint reads a few days early.
-      next_read: '2026-06-07',
-      threshold_kwh: 1000,
-      credit_usd: 125,
-      cdd_base_f: 65
-    });
-  }
+  // Merge: seed any missing keys without disturbing user-edited values. This way
+  // adding new config keys in code (e.g. bill rate terms) lands them on the next
+  // refresh — the empty-Config check was a foot-gun that hid all schema changes.
+  appendMissingConfigKeys_({
+    zip: '77080',
+    cycle_start: '2026-05-10',
+    // 28-day window (read-date estimate ~6/10): closing early is deliberate —
+    // it tests whether we clear 1,000 kWh even if CenterPoint reads a few days early.
+    next_read: '2026-06-07',
+    threshold_kwh: 1000,
+    credit_usd: 125,
+    cdd_base_f: 65,
+    // Bill rate terms — mirrored from bill/calculator.py DEFAULT_PLAN_TERMS
+    // (4Change Maxx Saver Value 12, effective 2026-04-15).
+    energy_charge_usd_per_kwh: 0.14611,
+    tdu_base_usd_per_cycle: 4.39,
+    tdu_charge_usd_per_kwh: 0.0506,
+    misc_fee_factor: 0.0205,
+    sales_tax_factor: 0.01
+  });
   ensureTab_('DailyUsage', ['service_date', 'total_kwh', 'source']);
-  ensureTab_('Weather', ['date', 'temp_min_f', 'temp_max_f', 'mean_temp_f', 'source']);
+  ensureTab_('Weather', ['date', 'temp_min_f', 'temp_max_f', 'mean_temp_f', 'precip_in', 'source']);
   ensureTab_('Projection', ['date', 'mean_temp_f', 'cdd', 'actual_kwh', 'predicted_kwh', 'used_kwh', 'cumulative_kwh', 'day_type']);
+  // Reason: keep ISO date columns as plain text so setValues never coerces them
+  // into date serials. That coercion + a timezone reformat on read-back was
+  // shifting each stored date one day earlier per refresh, smearing one day's
+  // kWh backward across the whole cycle. Applied every run, so it heals the
+  // live sheet too. clearContents (used by writeTable_) preserves the format.
+  forceColumnText_('DailyUsage', 1);
+  forceColumnText_('Weather', 1);
+  forceColumnText_('Projection', 1);
   if (!ss.getSheetByName('Summary')) ss.insertSheet('Summary');
 }
 
@@ -105,6 +123,38 @@ function runDailyUpdate() {
 }
 
 /**
+ * One-time repair after the date-shift bug smeared one day's kWh backward across
+ * the cycle. Rebuilds DailyUsage from scratch: re-seeds the 5/11–5/18 portal
+ * backfill (never delivered by email, so it must be entered manually) as `manual`
+ * rows, then imports the email days (which preserves those manual rows) and
+ * recomputes. Run once from the editor; safe to re-run. Values come from
+ * data/smt/IntervalData_portal_20260511_20260518.CSV.
+ * @return {Object} the recomputed summary.
+ */
+function repairDailyUsage() {
+  ensureInitialized_();  // also forces the ISO date columns to plain text
+  var portalBackfill = [
+    ['2026-05-11', 29.166],
+    ['2026-05-12', 37.353],
+    ['2026-05-13', 63.541],
+    ['2026-05-14', 37.848],
+    ['2026-05-15', 33.236],
+    ['2026-05-16', 55.833],
+    ['2026-05-17', 85.59],
+    ['2026-05-18', 40.766]
+  ];
+  var rows = portalBackfill.map(function (day) { return [day[0], day[1], 'manual']; });
+  writeTable_('DailyUsage', ['service_date', 'total_kwh', 'source'], rows);
+  var importedDays = importUsageFromGmail();
+  var summary = computeProjection();
+  logEvent_('repair_daily_usage_completed', {
+    seeded_manual_days: portalBackfill.length, imported_days: importedDays,
+    projected_total_kwh: summary.projected_total_kwh, verdict: summary.verdict
+  });
+  return summary;
+}
+
+/**
  * Read Summary + Projection for the web app and shape the chart series.
  * Actual cumulative stops at the last metered day; projected cumulative starts
  * there (bridged) and runs to cycle end so the two lines connect.
@@ -114,27 +164,45 @@ function getDashboardData() {
   var summary = readKeyValues_('Summary');
   var config = readConfig_();
   var projection = readTable_('Projection');
+  var weatherMap = readWeatherMap_();
 
-  var labels = [], actual = [], projected = [];
+  // Pivot = last day with a real meter reading. Everything up to and including it
+  // is the solid "so far" line (gaps bridged); only days AFTER it are the dashed
+  // projection. This keeps the dashed line strictly in the future, even when the
+  // early cycle days were never metered (start-of-cycle gap).
   var lastActualIndex = -1;
   projection.rows.forEach(function (row, i) {
-    labels.push(formatLabel_(normalizeDateCell_(row.date)));
+    if (String(row.day_type || '') === 'actual') lastActualIndex = i;
+  });
+
+  var labels = [], actual = [], projected = [], tempMin = [], tempMax = [], rain = [];
+  projection.rows.forEach(function (row, i) {
+    var iso = normalizeDateCell_(row.date);
+    labels.push(formatLabel_(iso));
+
     var cumulative = (row.cumulative_kwh === '' || row.cumulative_kwh == null) ? null : Number(row.cumulative_kwh);
-    var dayType = String(row.day_type || '');
-    if (dayType === 'actual') {
-      actual.push(cumulative);
-      projected.push(null);
-      lastActualIndex = i;
-    } else if (dayType === 'missing') {
-      actual.push(null);
+    var isMissing = String(row.day_type || '') === 'missing';
+    if (i <= lastActualIndex) {
+      // Past: one continuous solid line. Missing days are left null so the line
+      // bridges straight across them (spanGaps) rather than dropping to a gap.
+      actual.push(isMissing ? null : cumulative);
       projected.push(null);
     } else {
       actual.push(null);
-      projected.push(cumulative);
+      projected.push(cumulative);  // future only
     }
+
+    var w = weatherMap[iso];
+    tempMin.push(w ? round1_(w.min) : null);
+    tempMax.push(w ? round1_(w.max) : null);
+    // Drop a rain marker only on real near-term forecast days. Climatology normals
+    // (far-future fill) average to a little rain on almost every humid Houston day,
+    // which would smear drops across the whole tail and kill the signal.
+    var hasRain = w && w.source === 'forecast' && w.precip >= 0.01;
+    rain.push(hasRain ? round2_(w.precip) : null);
   });
   if (lastActualIndex >= 0 && lastActualIndex < projected.length) {
-    projected[lastActualIndex] = actual[lastActualIndex];  // bridge the lines
+    projected[lastActualIndex] = actual[lastActualIndex];  // bridge the two lines
   }
 
   var creditSafe = summary.credit_safe === true || String(summary.credit_safe).toLowerCase() === 'true';
@@ -142,9 +210,15 @@ function getDashboardData() {
     labels: labels,
     actualCumulative: actual,
     projectedCumulative: projected,
+    tempMin: tempMin,
+    tempMax: tempMax,
+    rain: rain,
     threshold: Number(config.threshold_kwh || 1000),
     creditUsd: Number(config.credit_usd || 125),
     projectedTotal: Number(summary.projected_total_kwh || 0),
+    projectedTotalUsd: Number(summary.projected_total_usd || 0),
+    daysElapsed: Number(summary.days_elapsed || 0),
+    dailyAvgKwh: Number(summary.daily_avg_kwh || 0),
     margin: Number(summary.margin_vs_1000 || 0),
     verdict: String(summary.verdict || ''),
     creditSafe: creditSafe,
@@ -200,6 +274,17 @@ function ensureTab_(name, headers) {
 }
 
 /**
+ * Force an entire column to plain-text number format ('@') so values written
+ * there are never reinterpreted (e.g. ISO date strings into date serials).
+ * @param {string} name Sheet/tab name.
+ * @param {number} columnIndex 1-based column index.
+ */
+function forceColumnText_(name, columnIndex) {
+  var sheet = getOrCreateSheet_(name);
+  sheet.getRange(1, columnIndex, sheet.getMaxRows(), 1).setNumberFormat('@');
+}
+
+/**
  * Read a header-row table into objects keyed by column header.
  * @param {string} name
  * @return {{headers: string[], rows: Array<Object>}}
@@ -248,6 +333,33 @@ function writeKeyValues_(name, obj) {
   var rows = [['key', 'value']];
   Object.keys(obj).forEach(function (key) { rows.push([key, obj[key]]); });
   sheet.getRange(1, 1, rows.length, 2).setValues(rows);
+}
+
+/**
+ * Append any keys from `defaults` that aren't already present in the Config
+ * sheet. Existing keys (and any user-edited values) are left untouched. Writes
+ * the header row if the sheet is empty.
+ * @param {Object} defaults
+ */
+function appendMissingConfigKeys_(defaults) {
+  var sheet = getOrCreateSheet_('Config');
+  var values = sheet.getDataRange().getValues();
+  var present = {};
+  var hasHeader = false;
+  for (var i = 0; i < values.length; i++) {
+    var key = String(values[i][0] || '').trim();
+    if (!key) continue;
+    if (key.toLowerCase() === 'key') { hasHeader = true; continue; }
+    present[key] = true;
+  }
+  var toAppend = [];
+  if (!hasHeader && values.length === 0) toAppend.push(['key', 'value']);
+  Object.keys(defaults).forEach(function (k) {
+    if (!present[k]) toAppend.push([k, defaults[k]]);
+  });
+  if (!toAppend.length) return;
+  var startRow = sheet.getLastRow() + 1;
+  sheet.getRange(startRow, 1, toAppend.length, 2).setValues(toAppend);
 }
 
 /**
@@ -330,6 +442,9 @@ function formatLabel_(iso) {
 
 /** Round to 1 decimal place. @return {number} */
 function round1_(x) { return Math.round(Number(x) * 10) / 10; }
+
+/** Round to 2 decimal places (precipitation inches). @return {number} */
+function round2_(x) { return Math.round(Number(x) * 100) / 100; }
 
 /** Round to 1 dp, or '' for null. @return {(number|string)} */
 function blankOr1_(x) { return x === null || x === undefined ? '' : round1_(x); }

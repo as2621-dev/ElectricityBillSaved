@@ -4,6 +4,7 @@
   <base target="_top">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0e15">
   <title>Electricity Dashboard</title>
   <style>
     :root {
@@ -25,8 +26,10 @@
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body { margin: 0; }
     /* Fixed viewport height — fall back to vh, prefer svh on iOS so the chart
-       isn't pushed below the dynamic toolbar and the page can't scroll. */
-    html { height: 100vh; height: 100svh; }
+       isn't pushed below the dynamic toolbar and the page can't scroll.
+       Background here too so the iOS safe-area gutter (outside body padding)
+       doesn't flash the UA default white in landscape. */
+    html { height: 100vh; height: 100svh; background: var(--bg); }
     body {
       height: 100vh;
       height: 100svh;
@@ -176,6 +179,8 @@
       color: var(--ink);
     }
     .hero-unit { font-size: 14px; font-weight: 600; color: var(--muted); }
+    .hero-dollars { font-size: 15px; font-weight: 600; color: var(--muted); }
+    .hero-dollars b { color: var(--ink); font-weight: 700; }
     .hero-pills {
       display: inline-flex;
       flex-direction: column;
@@ -265,6 +270,33 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
+    /* Landscape phones: wide enough to skip the narrow-width rule, but vertical
+       space is the bottleneck — desktop padding+hero would push the chart bottom
+       off-screen. Tighten everything that consumes vertical space. */
+    @media (max-height: 500px) {
+      body {
+        /* Honor the iOS safe-area inset only — no extra gutter, so the panel
+           reaches as close to the screen edge as the notch/home-indicator allows. */
+        padding:
+          env(safe-area-inset-top)
+          env(safe-area-inset-right)
+          env(safe-area-inset-bottom)
+          env(safe-area-inset-left);
+      }
+      .topbar { margin-bottom: 4px; padding: 0 8px; }
+      .panel { border-radius: 0; padding: 8px 10px 6px; border-left: 0; border-right: 0; }
+      .hero-label { display: none; }
+      .hero-num { font-size: clamp(22px, 5vw, 30px); }
+      .hero-unit { font-size: 12px; }
+      .hero-headline { gap: 2px 10px; margin-top: 0; }
+      .hero-pills { gap: 3px; }
+      .delta, .status-pill { font-size: 11px; padding: 2px 8px; }
+      .sofar { font-size: 11.5px; }
+      .chart-wrap { margin: 6px 0 2px; min-height: 120px; }
+      .legend { padding: 4px 0 0; margin-top: 2px; font-size: 11px; gap: 12px; }
+      .head-right .mono { display: none; }
+    }
+
     /* On narrow screens drop the verbose timestamp so the refresh button still
        fits in the top-right corner. Layout collapses to chart-first: small hero
        number, pills side-by-side under it, "so far" on its own line below. */
@@ -311,10 +343,7 @@
             <span id="heroNum" class="hero-num mono">—</span>
             <span class="hero-unit">kWh</span>
           </span>
-          <div class="hero-pills">
-            <div id="delta" class="delta"></div>
-            <div id="statusPill" class="status-pill" style="display:none"></div>
-          </div>
+          <span id="heroDollars" class="hero-dollars mono"></span>
           <span id="sofar" class="sofar"></span>
         </div>
       </div>
@@ -373,28 +402,27 @@
 
     function renderHeader(d, theme) {
       // Hero number = projected cycle total (the figure that decides the credit).
-      document.getElementById('heroNum').textContent = fmt(d.projectedTotal);
+      // Color it by verdict so the credit-cliff status is visible without a pill.
+      var heroNum = document.getElementById('heroNum');
+      heroNum.textContent = fmt(d.projectedTotal);
+      heroNum.style.color = theme.accent;
 
-      var m = Math.round(d.margin);
-      var over = m >= 0;
-      var delta = document.getElementById('delta');
-      delta.className = 'delta ' + (over ? 'good' : 'bad');
-      delta.textContent = (over ? '▲ +' : '▼ −') + fmt(Math.abs(m)) + ' kWh vs goal';
+      document.getElementById('heroDollars').innerHTML =
+        '≈ <b>$' + fmt(d.projectedTotalUsd) + '</b> bill';
 
-      // Status chip sits inline beside the delta.
-      var statusPill = document.getElementById('statusPill');
-      statusPill.innerHTML = '<span class="dot"></span>' + theme.status;
-      statusPill.style.display = 'inline-flex';
-
-      // "So far" = last real reading on the cumulative line, shown against the goal.
+      // "So far" = last real reading + how many days that took + daily avg.
       var sofar = null;
       for (var i = d.actualCumulative.length - 1; i >= 0; i--) {
         if (d.actualCumulative[i] != null) { sofar = d.actualCumulative[i]; break; }
       }
       var sofarEl = document.getElementById('sofar');
-      sofarEl.innerHTML = sofar != null
-        ? '<b>' + fmt(sofar) + '</b>/' + d.threshold.toLocaleString() + ' kWh used so far'
-        : '';
+      if (sofar != null && d.daysElapsed > 0) {
+        sofarEl.innerHTML =
+          '<b>' + fmt(sofar) + '</b> kWh in <b>' + d.daysElapsed + '</b> days · ' +
+          '<b>' + fmt(d.dailyAvgKwh) + '</b> kWh/day avg';
+      } else {
+        sofarEl.innerHTML = '';
+      }
 
       document.getElementById('hero').style.visibility = 'visible';
       document.getElementById('live').classList.add('show');
@@ -669,6 +697,22 @@
     }
 
     document.getElementById('refreshBtn').addEventListener('click', refreshNow);
+
+    // Dismiss the chart tooltip when the user taps anywhere outside the canvas.
+    // On touch devices there's no mouseleave to trigger Chart.js's default hide,
+    // so a tooltip opened by tapping a data point stays pinned until the next
+    // canvas interaction — feels sticky. Listening on pointerdown covers both
+    // mouse and touch in a single handler.
+    function dismissTooltipOutside(e) {
+      if (!chart) return;
+      var canvas = document.getElementById('usageChart');
+      if (canvas && canvas.contains(e.target)) return;  // chart handles its own
+      chart.setActiveElements([]);
+      chart.tooltip.setActiveElements([], { x: 0, y: 0 });
+      chart.update();
+    }
+    document.addEventListener('pointerdown', dismissTooltipOutside);
+
     loadDashboard();
   </script>
 </body>

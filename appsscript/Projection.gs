@@ -58,8 +58,8 @@ function readUsageMap_() {
 }
 
 /**
- * Read Weather tab into a map of date (ISO) -> {min, max, source}.
- * @return {Object<string, {min: number, max: number, source: string}>}
+ * Read Weather tab into a map of date (ISO) -> {min, max, precip, source}.
+ * @return {Object<string, {min: number, max: number, precip: number, source: string}>}
  */
 function readWeatherMap_() {
   var table = readTable_('Weather');
@@ -70,9 +70,37 @@ function readWeatherMap_() {
     var min = Number(row.temp_min_f);
     var max = Number(row.temp_max_f);
     if (isNaN(min) || isNaN(max)) return;
-    map[iso] = { min: min, max: max, source: String(row.source || 'forecast') };
+    var precip = Number(row.precip_in);
+    map[iso] = { min: min, max: max, precip: isNaN(precip) ? 0 : precip, source: String(row.source || 'forecast') };
   });
   return map;
+}
+
+/**
+ * Project a full-cycle bill in USD for a given total kWh. Faithful port of
+ * bill/calculator.py:compute_bill — REP energy + TDU (fixed + per-kWh)
+ * − bill credit (cliff at threshold) + misc fees + sales tax.
+ *
+ * @param {number} totalKwh Projected cycle kWh.
+ * @param {Object} cfg Config map (already read).
+ * @return {number} Projected bill total, USD.
+ */
+function projectBillUsd_(totalKwh, cfg) {
+  var energyRate = Number(cfg.energy_charge_usd_per_kwh || 0.14611);
+  var tduBase = Number(cfg.tdu_base_usd_per_cycle || 4.39);
+  var tduRate = Number(cfg.tdu_charge_usd_per_kwh || 0.0506);
+  var creditUsd = Number(cfg.credit_usd || 125);
+  var threshold = Number(cfg.threshold_kwh || 1000);
+  var miscFactor = Number(cfg.misc_fee_factor || 0.0205);
+  var taxFactor = Number(cfg.sales_tax_factor || 0.01);
+
+  var energy = energyRate * totalKwh;
+  var credit = totalKwh >= threshold ? -creditUsd : 0;
+  var tdu = tduBase + tduRate * totalKwh;
+  var preMisc = energy + credit + tdu;
+  var misc = preMisc * miscFactor;
+  var tax = (preMisc + misc) * taxFactor;
+  return preMisc + misc + tax;
 }
 
 /**
@@ -141,6 +169,7 @@ function computeProjection() {
   var rows = [];
   var actualSum = 0, modeledSum = 0, cumulative = 0;
   var lastActualIso = null;
+  var actualDays = 0;
 
   dates.forEach(function (iso) {
     var t = meanTemp(iso);
@@ -151,6 +180,7 @@ function computeProjection() {
       actualSum += actual;
       cumulative += actual;
       lastActualIso = iso;
+      actualDays += 1;
       rows.push([iso, blankOr1_(t), blankOr1_(c), round1_(actual), '', round1_(actual), round1_(cumulative), 'actual']);
       return;
     }
@@ -180,12 +210,18 @@ function computeProjection() {
     ['date', 'mean_temp_f', 'cdd', 'actual_kwh', 'predicted_kwh', 'used_kwh', 'cumulative_kwh', 'day_type'],
     rows);
 
+  var projectedBillUsd = projectBillUsd_(total, cfg);
+  var dailyAvgKwh = actualDays > 0 ? actualSum / actualDays : 0;
+
   var summary = {
     projected_total_kwh: total,
+    projected_total_usd: Math.round(projectedBillUsd * 100) / 100,
     margin_vs_1000: margin,
     verdict: verdict,
     credit_safe: creditSafe,
     last_actual_date: lastActualIso || '',
+    days_elapsed: actualDays,
+    daily_avg_kwh: round1_(dailyAvgKwh),
     baseload: round1_(model.baseload),
     beta: Math.round(model.beta * 100) / 100,
     r_squared: Math.round(model.r2 * 100) / 100,
