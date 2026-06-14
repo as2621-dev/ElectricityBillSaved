@@ -18,6 +18,24 @@
  */
 var REFRESH_INTERVAL_HOURS = 4;
 
+/**
+ * Seed rows for the Cycles tab (the month dropdown's source). One row per billing
+ * period: [cycle_key (YYYY-MM, also the dropdown value), label (month name shown
+ * to the user), cycle_start, next_read] over the [cycle_start, next_read) window.
+ * Add July/August rows here as their real CenterPoint read dates become known —
+ * the windows below are conservative estimates. Seeded via appendMissingCycles_,
+ * so editing a date in the sheet is never overwritten.
+ */
+var CYCLE_SEED_ROWS_ = [
+  // May: confirmed from the 4Change bill — Billing Period 05/11–06/09/2026 (the
+  // 06/09 meter read closes May / opens June; next_read is exclusive, so May
+  // counts 05/11–06/08 = 29 days). June chains off that read date with a
+  // conservative 28-day window (ends a few days short of the ~07/09 next read to
+  // guard against an early read). Correct June's next_read once its bill lands.
+  ['2026-05', 'May', '2026-05-11', '2026-06-09'],
+  ['2026-06', 'June', '2026-06-09', '2026-07-07']
+];
+
 // ─── Entry points ──────────────────────────────────────────────────────────
 
 /**
@@ -66,10 +84,11 @@ function ensureInitialized_() {
   // refresh — the empty-Config check was a foot-gun that hid all schema changes.
   appendMissingConfigKeys_({
     zip: '77080',
-    cycle_start: '2026-05-10',
-    // 28-day window (read-date estimate ~6/10): closing early is deliberate —
-    // it tests whether we clear 1,000 kWh even if CenterPoint reads a few days early.
-    next_read: '2026-06-07',
+    // Confirmed from the 4Change bill (Billing Period 05/11–06/09/2026). The
+    // Cycles tab is the live source of truth for the dashboard's per-month windows;
+    // these Config keys are only a fallback when Cycles is empty.
+    cycle_start: '2026-05-11',
+    next_read: '2026-06-09',
     threshold_kwh: 1000,
     credit_usd: 125,
     cdd_base_f: 65,
@@ -92,6 +111,7 @@ function ensureInitialized_() {
   forceColumnText_('DailyUsage', 1);
   forceColumnText_('Weather', 1);
   forceColumnText_('Projection', 1);
+  ensureCyclesSeeded_();
   if (!ss.getSheetByName('Summary')) ss.insertSheet('Summary');
 }
 
@@ -155,15 +175,31 @@ function repairDailyUsage() {
 }
 
 /**
- * Read Summary + Projection for the web app and shape the chart series.
- * Actual cumulative stops at the last metered day; projected cumulative starts
- * there (bridged) and runs to cycle end so the two lines connect.
+ * Shape the chart series for one billing cycle (the month dropdown's selection).
+ * Computes the projection live for the requested cycle from DailyUsage + Weather,
+ * so any month renders without a persisted per-cycle tab. Actual cumulative stops
+ * at the last metered day; projected cumulative starts there (bridged) and runs to
+ * cycle end so the two lines connect.
+ * @param {string} [cycleKey] Cycle to render (YYYY-MM). Defaults to the latest.
  * @return {Object} dashboard payload for Index.html.
  */
-function getDashboardData() {
-  var summary = readKeyValues_('Summary');
+function getDashboardData(cycleKey) {
+  ensureCyclesSeeded_();
   var config = readConfig_();
-  var projection = readTable_('Projection');
+  var cycles = readCycles_();
+  var cycle = findCycleByKey_(cycles, cycleKey) || resolveLatestCycle_(cycles);
+  if (!cycle) {
+    return {
+      labels: [], actualCumulative: [], projectedCumulative: [], tempMin: [], tempMax: [], rain: [],
+      threshold: Number(config.threshold_kwh || 1000), creditUsd: Number(config.credit_usd || 125),
+      projectedTotal: 0, projectedTotalUsd: 0, daysElapsed: 0, dailyAvgKwh: 0, margin: 0,
+      verdict: '', creditSafe: false, lastUpdated: '', cycleKey: '', cycleLabel: ''
+    };
+  }
+
+  var computed = computeProjectionForWindow_(config, cycle.cycle_start, cycle.next_read);
+  var summary = computed.summary;
+  var projectionRows = computed.rows;
   var weatherMap = readWeatherMap_();
 
   // Pivot = last day with a real meter reading. Everything up to and including it
@@ -171,12 +207,12 @@ function getDashboardData() {
   // projection. This keeps the dashed line strictly in the future, even when the
   // early cycle days were never metered (start-of-cycle gap).
   var lastActualIndex = -1;
-  projection.rows.forEach(function (row, i) {
+  projectionRows.forEach(function (row, i) {
     if (String(row.day_type || '') === 'actual') lastActualIndex = i;
   });
 
   var labels = [], actual = [], projected = [], tempMin = [], tempMax = [], rain = [];
-  projection.rows.forEach(function (row, i) {
+  projectionRows.forEach(function (row, i) {
     var iso = normalizeDateCell_(row.date);
     labels.push(formatLabel_(iso));
 
@@ -222,7 +258,9 @@ function getDashboardData() {
     margin: Number(summary.margin_vs_1000 || 0),
     verdict: String(summary.verdict || ''),
     creditSafe: creditSafe,
-    lastUpdated: String(summary.last_updated || '')
+    lastUpdated: String(summary.last_updated || ''),
+    cycleKey: cycle.cycle_key,
+    cycleLabel: cycle.label
   };
 }
 
@@ -363,6 +401,27 @@ function appendMissingConfigKeys_(defaults) {
 }
 
 /**
+ * Append any cycles whose cycle_key isn't already present in the Cycles tab.
+ * Existing rows (and any hand-corrected read dates) are left untouched, so
+ * seeding new months in code never clobbers user edits.
+ * @param {Array<Array>} defaults Rows of [cycle_key, label, cycle_start, next_read].
+ */
+function appendMissingCycles_(defaults) {
+  var sheet = getOrCreateSheet_('Cycles');
+  var values = sheet.getDataRange().getValues();
+  var present = {};
+  for (var i = 0; i < values.length; i++) {
+    var key = String(values[i][0] || '').trim();
+    if (!key || key.toLowerCase() === 'cycle_key') continue;
+    present[key] = true;
+  }
+  var toAppend = defaults.filter(function (row) { return !present[String(row[0])]; });
+  if (!toAppend.length) return;
+  var startRow = sheet.getLastRow() + 1;
+  sheet.getRange(startRow, 1, toAppend.length, 4).setValues(toAppend);
+}
+
+/**
  * Read a two-column key/value sheet into an object (skips the header row).
  * @param {string} name
  * @return {Object}
@@ -381,6 +440,136 @@ function readKeyValues_(name) {
 
 /** @return {Object} the Config tab as an object. */
 function readConfig_() { return readKeyValues_('Config'); }
+
+// ─── Cycles (billing periods) ───────────────────────────────────────────────
+
+/**
+ * Ensure the Cycles tab exists and is seeded with CYCLE_SEED_ROWS_. Cheap once
+ * populated (appendMissingCycles_ writes nothing when all keys are present), so
+ * it's safe to call on the web-app read path — this guarantees the month dropdown
+ * shows May + June (and defaults to the latest) on the very first dashboard load,
+ * before any Refresh/trigger has run.
+ */
+function ensureCyclesSeeded_() {
+  var existed = !!getSpreadsheet_().getSheetByName('Cycles');
+  ensureTab_('Cycles', ['cycle_key', 'label', 'cycle_start', 'next_read']);
+  if (!existed) {
+    // Force the key + date columns to plain text before seeding so ISO strings
+    // aren't coerced into date serials (same guard as the other dated tabs).
+    forceColumnText_('Cycles', 1);
+    forceColumnText_('Cycles', 3);
+    forceColumnText_('Cycles', 4);
+  }
+  appendMissingCycles_(CYCLE_SEED_ROWS_);
+  migrateSeededCycleDates_();
+}
+
+/**
+ * One-time self-heal for the two cycle rows first seeded with ESTIMATED dates,
+ * before the 4Change bill confirmed the real read date (Billing Period
+ * 05/11–06/09/2026). Updates a row's window ONLY if it still matches the
+ * known-stale estimate, so a genuine hand-edit is never overwritten and re-running
+ * is a no-op once corrected.
+ */
+function migrateSeededCycleDates_() {
+  var corrections = {
+    '2026-05': { from: ['2026-05-10', '2026-06-07'], to: ['2026-05-11', '2026-06-09'] },
+    '2026-06': { from: ['2026-06-07', '2026-07-05'], to: ['2026-06-09', '2026-07-07'] }
+  };
+  var sheet = getOrCreateSheet_('Cycles');
+  var values = sheet.getDataRange().getValues();
+  for (var i = 1; i < values.length; i++) {  // row 0 = header
+    var key = String(values[i][0] || '').trim();
+    var corr = corrections[key];
+    if (!corr) continue;
+    var start = normalizeDateCell_(values[i][2]);     // col C = cycle_start
+    var nextRead = normalizeDateCell_(values[i][3]);  // col D = next_read
+    if (start === corr.from[0] && nextRead === corr.from[1]) {
+      sheet.getRange(i + 1, 3).setValue(corr.to[0]);
+      sheet.getRange(i + 1, 4).setValue(corr.to[1]);
+      logEvent_('cycle_dates_migrated', { cycle_key: key, from: corr.from.join('..'), to: corr.to.join('..') });
+    }
+  }
+}
+
+/**
+ * Read the Cycles tab into a list of billing periods sorted by start date.
+ * Falls back to a single cycle synthesized from Config (cycle_start/next_read)
+ * when the tab is empty, so the dashboard keeps working pre-migration.
+ * @return {Array<{cycle_key: string, label: string, cycle_start: string, next_read: string}>}
+ */
+function readCycles_() {
+  var table = readTable_('Cycles');
+  var cycles = table.rows.map(function (row) {
+    return {
+      cycle_key: String(row.cycle_key || '').trim(),
+      label: String(row.label || '').trim(),
+      cycle_start: normalizeDateCell_(row.cycle_start),
+      next_read: normalizeDateCell_(row.next_read)
+    };
+  }).filter(function (c) { return c.cycle_key && c.cycle_start && c.next_read; });
+
+  if (!cycles.length) {
+    var cfg = readConfig_();
+    var startIso = normalizeDateCell_(cfg.cycle_start);
+    var nextReadIso = normalizeDateCell_(cfg.next_read);
+    if (startIso && nextReadIso) {
+      cycles.push({ cycle_key: startIso.slice(0, 7), label: monthLabel_(startIso), cycle_start: startIso, next_read: nextReadIso });
+    }
+  }
+
+  cycles.sort(function (a, b) { return a.cycle_start < b.cycle_start ? -1 : (a.cycle_start > b.cycle_start ? 1 : 0); });
+  return cycles;
+}
+
+/** @return {string} full month name for an ISO date, e.g. "June". */
+function monthLabel_(iso) {
+  var p = parseISO_(iso);
+  return Utilities.formatDate(new Date(Date.UTC(p.y, p.m - 1, p.d)), 'UTC', 'MMMM');
+}
+
+/**
+ * Pick the "latest" cycle for the default view: the one whose window contains
+ * today, else the most recent that has already started, else the earliest.
+ * @param {Array<Object>} cycles Output of readCycles_().
+ * @return {Object|null}
+ */
+function resolveLatestCycle_(cycles) {
+  if (!cycles.length) return null;
+  var today = todayIso_();
+  for (var i = 0; i < cycles.length; i++) {
+    if (cycles[i].cycle_start <= today && today < cycles[i].next_read) return cycles[i];
+  }
+  for (var j = cycles.length - 1; j >= 0; j--) {
+    if (cycles[j].cycle_start <= today) return cycles[j];
+  }
+  return cycles[0];
+}
+
+/** @return {Object|null} cycle with the given key, or null. */
+function findCycleByKey_(cycles, cycleKey) {
+  if (!cycleKey) return null;
+  for (var i = 0; i < cycles.length; i++) {
+    if (cycles[i].cycle_key === cycleKey) return cycles[i];
+  }
+  return null;
+}
+
+/**
+ * Web-exposed: list cycles for the dashboard's month dropdown + which one is the
+ * default (latest). Sorted newest-last in `cycles`; the client reverses to show
+ * the latest month at the top.
+ * @return {{cycles: Array<{key: string, label: string}>, latestKey: string}}
+ */
+function listCycles() {
+  ensureCyclesSeeded_();
+  var cycles = readCycles_();
+  var latest = resolveLatestCycle_(cycles);
+  return {
+    cycles: cycles.map(function (c) { return { key: c.cycle_key, label: c.label }; }),
+    latestKey: latest ? latest.cycle_key : ''
+  };
+}
 
 // ─── Date + number utilities ──────────────────────────────────────────────────
 

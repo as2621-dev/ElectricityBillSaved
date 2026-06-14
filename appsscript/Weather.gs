@@ -165,14 +165,42 @@ function fetchClimatology_(lat, lon, cycleStartIso, numDays, lookbackYears) {
 }
 
 /**
- * Fetch weather for the whole cycle and write the Weather tab.
+ * Overall weather window to fetch: the union of every billing cycle in the Cycles
+ * tab (earliest cycle_start → latest next_read), so the Weather tab covers ALL
+ * months the dashboard can show — not just the latest cycle. Falls back to Config's
+ * single cycle when Cycles is empty.
+ * @return {{startIso: string, nextReadIso: string}}
+ */
+function weatherSpan_() {
+  var cycles = readCycles_();
+  if (!cycles.length) {
+    var cfg = readConfig_();
+    return { startIso: normalizeDateCell_(cfg.cycle_start), nextReadIso: normalizeDateCell_(cfg.next_read) };
+  }
+  var startIso = cycles[0].cycle_start;
+  var nextReadIso = cycles[0].next_read;
+  cycles.forEach(function (c) {
+    if (c.cycle_start < startIso) startIso = c.cycle_start;
+    if (c.next_read > nextReadIso) nextReadIso = c.next_read;
+  });
+  return { startIso: startIso, nextReadIso: nextReadIso };
+}
+
+/**
+ * Fetch weather across ALL billing cycles and write the Weather tab.
  * Recent + near days = forecast; days beyond the 16-day horizon = climatology.
- * @return {number} number of cycle days written.
+ * Spans the union of every cycle so each month the dropdown offers has weather —
+ * the old per-Config-cycle window left non-latest months (e.g. June) blank.
+ * @return {number} number of days written.
  */
 function refreshWeather() {
   var cfg = readConfig_();
-  var startIso = normalizeDateCell_(cfg.cycle_start);
-  var nextReadIso = normalizeDateCell_(cfg.next_read);
+  var span = weatherSpan_();
+  var startIso = span.startIso;
+  var nextReadIso = span.nextReadIso;
+  if (!startIso || !nextReadIso) {
+    throw new Error('No billing cycle configured — add a row to the Cycles tab, then Refresh.');
+  }
   var dates = cycleDatesIso_(startIso, nextReadIso);
   var zip = String(cfg.zip || '').trim();
   if (!zip) {

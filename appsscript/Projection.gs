@@ -121,14 +121,17 @@ function trailingAverage_(usageMap, meteredDatesIso, n) {
 }
 
 /**
- * Compute the cycle projection and write the Projection + Summary tabs.
- * Reads Config, DailyUsage, and Weather. Idempotent — safe to re-run.
- * @return {Object} the summary object that was written.
+ * Compute the projection for one billing window WITHOUT writing any tabs. Pure
+ * given Config + DailyUsage + Weather, so the web app can render any month on
+ * demand (getDashboardData) while computeProjection() persists the latest one.
+ *
+ * @param {Object} cfg Config map (already read).
+ * @param {string} startIso Cycle start, ISO "YYYY-MM-DD" (inclusive).
+ * @param {string} nextReadIso Estimated next read, ISO (exclusive end).
+ * @return {{summary: Object, rows: Array<Object>}} Summary key/values + one row
+ *   object per cycle day, keyed by the Projection headers.
  */
-function computeProjection() {
-  var cfg = readConfig_();
-  var startIso = normalizeDateCell_(cfg.cycle_start);
-  var nextReadIso = normalizeDateCell_(cfg.next_read);
+function computeProjectionForWindow_(cfg, startIso, nextReadIso) {
   var cddBase = Number(cfg.cdd_base_f || 65);
   var threshold = Number(cfg.threshold_kwh || 1000);
 
@@ -181,20 +184,23 @@ function computeProjection() {
       cumulative += actual;
       lastActualIso = iso;
       actualDays += 1;
-      rows.push([iso, blankOr1_(t), blankOr1_(c), round1_(actual), '', round1_(actual), round1_(cumulative), 'actual']);
+      rows.push({ date: iso, mean_temp_f: blankOr1_(t), cdd: blankOr1_(c), actual_kwh: round1_(actual),
+        predicted_kwh: '', used_kwh: round1_(actual), cumulative_kwh: round1_(cumulative), day_type: 'actual' });
       return;
     }
 
     var predicted = predict(iso);
     if (predicted === null) {
       // No weather for this day and not in fallback mode — exclude from the total.
-      rows.push([iso, blankOr1_(t), blankOr1_(c), '', '', '', round1_(cumulative), 'missing']);
+      rows.push({ date: iso, mean_temp_f: blankOr1_(t), cdd: blankOr1_(c), actual_kwh: '',
+        predicted_kwh: '', used_kwh: '', cumulative_kwh: round1_(cumulative), day_type: 'missing' });
       return;
     }
     modeledSum += predicted;
     cumulative += predicted;
     var dayType = weatherMap[iso] ? weatherMap[iso].source : 'forecast';
-    rows.push([iso, blankOr1_(t), blankOr1_(c), '', round1_(predicted), round1_(predicted), round1_(cumulative), dayType]);
+    rows.push({ date: iso, mean_temp_f: blankOr1_(t), cdd: blankOr1_(c), actual_kwh: '',
+      predicted_kwh: round1_(predicted), used_kwh: round1_(predicted), cumulative_kwh: round1_(cumulative), day_type: dayType });
   });
 
   var total = Math.round(actualSum + modeledSum);
@@ -205,10 +211,6 @@ function computeProjection() {
   else if (total >= threshold) verdict = 'CLOSE';
   else if (total >= threshold - 75) verdict = 'AT RISK';
   else verdict = 'MISS';
-
-  writeTable_('Projection',
-    ['date', 'mean_temp_f', 'cdd', 'actual_kwh', 'predicted_kwh', 'used_kwh', 'cumulative_kwh', 'day_type'],
-    rows);
 
   var projectedBillUsd = projectBillUsd_(total, cfg);
   var dailyAvgKwh = actualDays > 0 ? actualSum / actualDays : 0;
@@ -231,11 +233,36 @@ function computeProjection() {
     modeled_kwh: round1_(modeledSum),
     last_updated: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm 'CT'")
   };
-  writeKeyValues_('Summary', summary);
+
+  return { summary: summary, rows: rows };
+}
+
+/**
+ * Compute + persist the projection for the LATEST billing cycle. Trigger + menu
+ * entry point. Writes the Projection + Summary tabs so the sheet view shows the
+ * current month; the web app computes other months on demand via
+ * getDashboardData. Idempotent — safe to re-run.
+ * @return {Object} the summary object that was written.
+ */
+function computeProjection() {
+  var cfg = readConfig_();
+  var cycle = resolveLatestCycle_(readCycles_());
+  if (!cycle) {
+    throw new Error('No billing cycle configured. Add a row to the Cycles tab (cycle_key, label, cycle_start, next_read).');
+  }
+
+  var computed = computeProjectionForWindow_(cfg, cycle.cycle_start, cycle.next_read);
+  var headers = ['date', 'mean_temp_f', 'cdd', 'actual_kwh', 'predicted_kwh', 'used_kwh', 'cumulative_kwh', 'day_type'];
+  var matrix = computed.rows.map(function (row) {
+    return headers.map(function (header) { return row[header]; });
+  });
+  writeTable_('Projection', headers, matrix);
+  writeKeyValues_('Summary', computed.summary);
 
   logEvent_('compute_projection_completed', {
-    projected_total_kwh: total, margin: margin, verdict: verdict,
-    fit_days: fitCdds.length, beta: summary.beta, r2: summary.r_squared, fallback: useFallback
+    cycle_key: cycle.cycle_key, projected_total_kwh: computed.summary.projected_total_kwh,
+    margin: computed.summary.margin_vs_1000, verdict: computed.summary.verdict,
+    fit_days: computed.summary.fit_days, beta: computed.summary.beta, r2: computed.summary.r_squared
   });
-  return summary;
+  return computed.summary;
 }

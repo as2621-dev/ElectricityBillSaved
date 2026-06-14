@@ -13,18 +13,28 @@ automatically from the Smart Meter Texas emails in your Gmail.
 | File | Purpose |
 |---|---|
 | `appsscript.json` | Manifest: scopes (Gmail/Sheets/fetch) + web app config |
-| `Code.gs` | Entry points (`doGet`, `setup`, `runDailyUpdate`, `getDashboardData`) + shared helpers |
+| `Code.gs` | Entry points (`doGet`, `setup`, `runDailyUpdate`, `getDashboardData`, `listCycles`) + shared helpers |
 | `Gmail.gs` | Import SMT CSV attachments → daily totals (`importUsageFromGmail`) |
 | `Weather.gs` | Open-Meteo forecast + climatology (`refreshWeather`) |
-| `Projection.gs` | OLS fit + predict + cumulative + verdict (`computeProjection`) |
-| `Index.html` | Graph-first dashboard (Chart.js) |
+| `Projection.gs` | OLS fit + predict + cumulative + verdict, per cycle (`computeProjectionForWindow_`, `computeProjection`) |
+| `Index.html` | Graph-first dashboard (Chart.js) + month dropdown |
 
 ## Sheet tabs (created by `setup()`)
-- **Config** — `zip`, `cycle_start`, `next_read`, `threshold_kwh`, `credit_usd`, `cdd_base_f`
+- **Config** — `zip`, `cycle_start`, `next_read`, `threshold_kwh`, `credit_usd`, `cdd_base_f`, bill-rate terms
+- **Cycles** — `cycle_key | label | cycle_start | next_read` — one row per billing month; feeds the dashboard's month dropdown
 - **DailyUsage** — `service_date | total_kwh | source`
 - **Weather** — `date | temp_min_f | temp_max_f | mean_temp_f | source`
-- **Projection** — `date | mean_temp_f | cdd | actual_kwh | predicted_kwh | used_kwh | cumulative_kwh | day_type`
+- **Projection** — `date | mean_temp_f | cdd | actual_kwh | predicted_kwh | used_kwh | cumulative_kwh | day_type` (latest cycle; the web app computes other months on demand)
 - **Summary** — key/value the web app reads (projected total, verdict, model fit, last_updated)
+
+## Months / billing cycles
+The dashboard's top-right **month dropdown** lists every row in the **Cycles** tab and
+defaults to the latest (the cycle whose window contains today, else the most recent
+started). Each "month" is a **billing cycle**, not a calendar month — that's the period
+the 1,000 kWh credit cliff applies to. May + June are seeded automatically; add a row for
+July/August (etc.) as each cycle's real CenterPoint read date becomes known. `cycle_start`
+is inclusive, `next_read` exclusive; windows can be conservative estimates and edited any
+time (seeds never overwrite hand-edited rows).
 
 ## Deploy (container-bound — recommended)
 The script must be bound to the Sheet (so the ⚡ menu and `getActive()` work).

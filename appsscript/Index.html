@@ -88,6 +88,31 @@
       border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
     }
     .live.show { display: inline-flex; }
+    .topbar-right { display: flex; align-items: center; gap: 10px; }
+    /* Month dropdown — pill styled to match the dark theme; native arrow removed
+       and replaced with a muted chevron so it reads as a first-class control. */
+    .cycle-select {
+      appearance: none;
+      -webkit-appearance: none;
+      background-color: var(--card);
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%237c8a9c' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+      background-repeat: no-repeat;
+      background-position: right 11px center;
+      border: 1px solid var(--card-border);
+      border-radius: 999px;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.6px;
+      padding: 7px 30px 7px 14px;
+      line-height: 1;
+      cursor: pointer;
+      transition: border-color 0.2s, color 0.2s;
+    }
+    .cycle-select:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+    /* Native option popups can't fully inherit the dark theme, but most engines
+       honor these so the list isn't white-on-white. */
+    .cycle-select option { background: #0a0e15; color: #e9eef5; }
     .refresh-btn {
       display: inline-flex;
       align-items: center;
@@ -331,7 +356,10 @@
 <body>
   <div class="topbar">
     <div class="brand"><span class="bolt">⚡</span>Cycle Usage</div>
-    <div id="live" class="live"><span class="dot"></span>Live</div>
+    <div class="topbar-right">
+      <select id="cycleSelect" class="cycle-select mono" aria-label="Billing month"></select>
+      <div id="live" class="live"><span class="dot"></span>Live</div>
+    </div>
   </div>
 
   <div class="panel">
@@ -373,6 +401,7 @@
   <script>
     var COLORS = { good: '#19e6a4', warn: '#ffb020', bad: '#ff5c5c' };
     var chart = null;  // current Chart.js instance, destroyed before each re-render
+    var selectedCycleKey = null;  // which billing month the dropdown is showing
 
     /** Convert "#rrggbb" + alpha into an rgba() string. */
     function withAlpha(hex, alpha) {
@@ -664,10 +693,43 @@
       console.error(err);
     }
 
-    /** Fetch the latest precomputed dashboard payload and render it. */
+    /** Fetch the dashboard payload for the selected month and render it. */
     function loadDashboard() {
-      google.script.run.withSuccessHandler(render).withFailureHandler(showError).getDashboardData();
+      google.script.run.withSuccessHandler(render).withFailureHandler(showError).getDashboardData(selectedCycleKey);
     }
+
+    /**
+     * Populate the month dropdown and default to the latest cycle, then load it.
+     * Newest month is listed first so "always show the latest month" is the top
+     * (and selected) option. Falls back to a plain load if the cycle list fails.
+     */
+    function loadCycles() {
+      google.script.run
+        .withSuccessHandler(function (info) {
+          var select = document.getElementById('cycleSelect');
+          select.innerHTML = '';
+          var cycles = (info && info.cycles) || [];
+          if (!cycles.length) { loadDashboard(); return; }
+          // readCycles_ returns oldest→newest; reverse so the latest sits on top.
+          cycles.slice().reverse().forEach(function (c) {
+            var opt = document.createElement('option');
+            opt.value = c.key;
+            opt.textContent = c.label;
+            select.appendChild(opt);
+          });
+          selectedCycleKey = (info && info.latestKey) || cycles[cycles.length - 1].key;
+          select.value = selectedCycleKey;
+          loadDashboard();
+        })
+        .withFailureHandler(function (e) { showError(e); loadDashboard(); })
+        .listCycles();
+    }
+
+    document.getElementById('cycleSelect').addEventListener('change', function (e) {
+      selectedCycleKey = e.target.value;
+      setOverlay('Loading ' + (e.target.options[e.target.selectedIndex] || {}).text + '…', true);
+      loadDashboard();
+    });
 
     function endRefresh() {
       var btn = document.getElementById('refreshBtn');
@@ -690,7 +752,7 @@
           google.script.run
             .withSuccessHandler(function (d) { render(d); endRefresh(); })
             .withFailureHandler(function (e) { showError(e); endRefresh(); })
-            .getDashboardData();
+            .getDashboardData(selectedCycleKey);
         })
         .withFailureHandler(function (e) { showError(e); endRefresh(); })
         .runDailyUpdate();
@@ -713,7 +775,7 @@
     }
     document.addEventListener('pointerdown', dismissTooltipOutside);
 
-    loadDashboard();
+    loadCycles();
   </script>
 </body>
 </html>
